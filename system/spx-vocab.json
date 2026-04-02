@@ -1,0 +1,24 @@
+{
+  "domains": ["artifact", "lexicon", "context", "wallet"],
+  "entities": ["audio", "word", "session", "transaction"],
+  "actions": ["create", "read", "update", "delete", "transcribe", "validate", "resolve"],
+  "synonyms": {
+    "speech": "audio",
+    "voice": "audio",
+    "sound": "audio",
+
+    "token": "word",
+    "tokens": "word",
+
+    "convert": "transcribe",
+    "process": "resolve",
+    "handle": "resolve",
+
+    "store": "create",
+    "save": "create",
+
+    "retrieve": "read",
+    "get": "read",
+    "fetch": "read"
+  }
+}
