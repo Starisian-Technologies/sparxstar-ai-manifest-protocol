@@ -1,81 +1,258 @@
 # SPX Protocol Contract
 
-## Authority
+Status: Authoritative human-readable contract
+Machine authority: spx-vocab.json + composition rules + CI validator
 
-`system/spx-vocab.json` is the single source of truth for all vocabulary.
-No name, identifier, class, function, or route may be introduced outside of the terms defined in that file.
+This repository uses a deterministic closed-vocabulary execution protocol.
 
-## Vocabulary Structure
+The purpose of this contract is to ensure that humans, AI agents, validators, and CI systems all produce the same execution coordinates, names, classes, and routes from the same intent.
 
-The vocab file defines four top-level keys:
+This contract is not advisory. It is binding.
 
-- `domains` — the top-level organisational scope (e.g. `artifact`, `lexicon`)
-- `entities` — the subject of an operation (e.g. `audio`, `word`)
-- `actions` — the operation being performed (e.g. `transcribe`, `resolve`)
-- `synonyms` — canonical normalisations that map alternate words onto approved terms
+## 1. Core Principle
 
-Any term not present in `domains`, `entities`, or `actions` is forbidden.
-Any synonym maps an informal word onto its canonical equivalent before validation.
+Determinism does not come from intelligence. It comes from fully specified rules.
 
-## Naming Rules
+No agent, developer, or tool may guess, infer beyond the defined protocol, or invent alternate naming structures.
 
-### PHP Namespace
+If an intent cannot be mapped using the defined vocabulary and normalization rules, it must fail explicitly.
+
+## 2. Authority Stack
+
+The system authority is ordered as follows:
+
+1. spx-vocab.json
+2. Composition rules
+3. CI validator
+4. This CONTRACT.md
+
+This file explains the system. It does not override the machine-readable protocol.
+
+If this file conflicts with spx-vocab.json or the validator, the machine-readable protocol wins.
+
+## 3. Closed Vocabulary Protocol
+
+All executable naming must be derived from exactly three coordinates:
+
+- domain
+- entity
+- action
+
+Only one domain, one entity, and one action may be selected for a single valid mapping.
+
+No extra coordinates may be inserted.
+No coordinate may be omitted.
+
+## 4. Allowed Values
+
+The allowed values are defined in spx-vocab.json.
+
+**Domains:**
+
+- artifact
+- lexicon
+- context
+- wallet
+
+**Entities:**
+
+- audio
+- word
+- session
+- transaction
+
+**Actions:**
+
+- create
+- read
+- update
+- delete
+- transcribe
+- validate
+- resolve
+
+These values are closed.
+
+## 5. Normalization Rules
+
+Normalization MUST use the synonym map from spx-vocab.json.
+
+If a token is not in allowed values and not mapped → INVALID.
+
+Example:
 
 ```
-SPX\{Domain}\{Entity}
+speech → audio
+store → create
+retrieve → read
 ```
 
-- `{Domain}` and `{Entity}` are PascalCase versions of values in `domains` and `entities`.
+## 6. Selection Rules
 
-### PHP Class Name
+After normalization:
 
-```
-{Action}Service
-```
+- domain must be in allowed domains
+- entity must be in allowed entities
+- action must be in allowed actions
 
-- `{Action}` is the PascalCase version of a value in `actions`.
+Else → FAIL
 
-### PHP Function Name
+## 7. Single Intent Rule
+
+Multiple intents → INVALID
+
+Example:
+"validate audio and resolve transaction" → FAIL
+
+## 8. Failure Rule
+
+System MUST:
+
+- fail explicitly
+- identify unmappable token
+
+System MUST NOT:
+
+- guess
+- partially map
+- invent
+
+## 9. Composition Rules (MANDATORY)
+
+These are NOT invention. They are deterministic outputs.
+
+**Function:**
 
 ```
 spx_{domain}_{entity}_{action}
 ```
 
-- All lowercase.
-- All three segments must exist in the vocab.
+**Class:**
 
-### File Path
+```
+SPX\{DomainPascal}\{EntityPascal}\{ActionPascal}Service
+```
+
+**Route:**
+
+```
+/{domain}/{entity}/{action}
+```
+
+**Namespace:**
+
+```
+SPX\{DomainPascal}\{EntityPascal}
+```
+
+**File:**
 
 ```
 /src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
 ```
 
-- The file path must match the namespace and class name exactly.
+## 10. String Rules
 
-## Forbidden Words
+**Internal:**
 
-The following words are forbidden in any class name, function name, or namespace segment:
+- lowercase
+- trimmed
 
-`Manager`, `Engine`, `Processor`, `Handler`, `Pipeline`, `Controller`, `Helper`, `Util`, `Utils`, `Base`, `Abstract`, `Factory`, `Builder`, `Registry`, `Repository`, `Facade`, `Adapter`, `Proxy`, `Decorator`, `Observer`, `Listener`, `Emitter`
+**Function:**
 
-## Enforcement
+- snake_case
 
-- The validator (`tools/spx-validator.php`) reads `system/spx-vocab.json` and scans `src/`.
-- Any violation causes the validator to exit with code `1` and print the expected vs. actual values.
-- The CI workflow (`.github/workflows/spx-standards.yml`) runs the validator on every pull request and push to `main`.
-- A failing validator blocks merge.
+**Namespace/Class:**
 
-## Compliance Criteria
+- PascalCase
 
-A file is compliant when ALL of the following are true:
+**Route:**
 
-1. Namespace matches `SPX\{Domain}\{Entity}` using valid vocab terms.
-2. Class name matches `{Action}Service` using a valid vocab action.
-3. At least one function follows `spx_{domain}_{entity}_{action}` with valid vocab terms.
-4. No forbidden words appear in any identifier.
-5. File path matches `/src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php`.
+- lowercase path
 
-## Immutability
+## 11. Casing
 
-This contract may only be changed through a deliberate protocol revision that also updates `system/spx-vocab.json` and all affected source files.
-No individual implementation file may override or extend this contract.
+All inputs must be normalized to lowercase BEFORE composition.
+
+## 12. Pluralization
+
+No automatic singularization.
+
+Plural handling must exist in the synonym map.
+
+## 13. Authority
+
+Authority is runtime ONLY.
+
+Authority must never appear in:
+
+- namespace
+- class
+- function
+- route
+
+## 14. Filesystem
+
+```
+/src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
+```
+
+## 15. Namespace
+
+```
+SPX\{DomainPascal}\{EntityPascal}
+```
+
+## 16. Class Type (STRICT)
+
+Only allowed:
+
+- Service
+
+Everything else → FAIL
+
+Forbidden:
+Manager, Engine, Processor, Handler, Pipeline, etc.
+
+## 17. Output Format (STRICT)
+
+```
+domain:
+entity:
+action:
+function:
+class:
+route:
+```
+
+Example:
+
+```
+domain: artifact
+entity: audio
+action: transcribe
+function: spx_artifact_audio_transcribe
+class: SPX\Artifact\Audio\TranscribeService
+route: /artifact/audio/transcribe
+```
+
+## 18. CI Rules
+
+Validator MUST enforce:
+
+- vocab membership
+- normalization
+- single intent
+- composition correctness
+- casing
+- namespace
+- file structure
+- output format
+
+Fail on ANY violation.
+
+## 19. Final Rule
+
+Same input + same vocab = SAME output
+
+If not → protocol incomplete
