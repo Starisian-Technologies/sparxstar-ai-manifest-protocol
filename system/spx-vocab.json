@@ -1,4 +1,5 @@
 {
+  "version": "1.0.0",
   "domains": ["artifact", "lexicon", "context", "wallet"],
   "entities": ["audio", "word", "session", "transaction"],
   "actions": ["create", "read", "update", "delete", "transcribe", "validate", "resolve"],
@@ -6,19 +7,25 @@
     "speech": "audio",
     "voice": "audio",
     "sound": "audio",
-
+    "text": "word",
     "token": "word",
     "tokens": "word",
-
     "convert": "transcribe",
-    "process": "resolve",
     "handle": "resolve",
-
+    "process": "resolve",
     "store": "create",
     "save": "create",
-
     "retrieve": "read",
     "get": "read",
     "fetch": "read"
-  }
+  },
+  "composition": {
+    "function": "spx_{domain}_{entity}_{action}",
+    "class": "SPX\\{DomainPascal}\\{EntityPascal}\\{ActionPascal}Service",
+    "route": "/{domain}/{entity}/{action}",
+    "namespace": "SPX\\{DomainPascal}\\{EntityPascal}",
+    "file": "/src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php"
+  },
+  "allowed_class_suffixes": ["Service"],
+  "forbidden_class_suffixes": ["Manager", "Engine", "Processor", "Handler", "Pipeline", "Coordinator", "Helper", "Utility"]
 }

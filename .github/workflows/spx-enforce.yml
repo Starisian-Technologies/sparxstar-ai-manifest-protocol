@@ -1,0 +1,221 @@
+name: SPX Protocol Enforcement
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  spx-validate:
+    name: SPX Protocol Validator
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify spx-vocab.json exists
+        run: |
+          if [ ! -f system/spx-vocab.json ]; then
+            echo "CI FAILED: spx-vocab.json not found. Protocol authority file is required."
+            exit 1
+          fi
+
+      - name: Validate spx-vocab.json is valid JSON
+        run: |
+          python3 -c "
+          import json, sys
+          try:
+              with open('system/spx-vocab.json') as f:
+                  vocab = json.load(f)
+              required = ['domains', 'entities', 'actions', 'synonyms', 'composition', 'allowed_class_suffixes']
+              missing = [k for k in required if k not in vocab]
+              if missing:
+                  print(f'CI FAILED: spx-vocab.json missing required keys: {missing}', file=sys.stderr)
+                  sys.exit(1)
+              print('spx-vocab.json: valid')
+          except json.JSONDecodeError as e:
+              print(f'CI FAILED: spx-vocab.json is not valid JSON: {e}', file=sys.stderr)
+              sys.exit(1)
+          "
+
+      - name: Run SPX protocol validator
+        run: python3 tools/spx_validator.py
+
+      - name: Scan PHP files for namespace violations
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys, json
+
+          with open("system/spx-vocab.json") as f:
+              vocab = json.load(f)
+
+          domains  = [d.capitalize() for d in vocab["domains"]]
+          entities = [e.capitalize() for e in vocab["entities"]]
+          allowed_suffixes  = vocab.get("allowed_class_suffixes", ["Service"])
+          forbidden_suffixes = vocab.get("forbidden_class_suffixes", [])
+
+          errors = []
+
+          for root, dirs, files in os.walk("src"):
+              for fname in files:
+                  if not fname.endswith(".php"):
+                      continue
+                  fpath = os.path.join(root, fname)
+
+                  with open(fpath) as f:
+                      content = f.read()
+
+                  ns_match = re.search(r"^namespace\s+(SPX\\[^\s;]+)", content, re.MULTILINE)
+                  if ns_match:
+                      ns = ns_match.group(1)
+                      parts = ns.split("\\")
+                      if len(parts) != 3:
+                          errors.append(f"{fpath}: namespace '{ns}' must be exactly SPX\\Domain\\Entity")
+                      else:
+                          if parts[1] not in domains:
+                              errors.append(f"{fpath}: namespace domain '{parts[1]}' not in allowed domains {domains}")
+                          if parts[2] not in entities:
+                              errors.append(f"{fpath}: namespace entity '{parts[2]}' not in allowed entities {entities}")
+
+                  class_match = re.search(r"^class\s+(\w+)", content, re.MULTILINE)
+                  if class_match:
+                      classname = class_match.group(1)
+                      for forbidden in forbidden_suffixes:
+                          if classname.endswith(forbidden):
+                              errors.append(f"{fpath}: class '{classname}' uses forbidden suffix '{forbidden}'")
+                      has_allowed = any(classname.endswith(s) for s in allowed_suffixes)
+                      if not has_allowed:
+                          errors.append(f"{fpath}: class '{classname}' does not end with allowed suffix {allowed_suffixes}")
+
+                  fn_matches = re.findall(r"function\s+(spx_\w+)\s*\(", content)
+                  for fn in fn_matches:
+                      parts = fn.split("_")
+                      if len(parts) != 4 or parts[0] != "spx":
+                          errors.append(f"{fpath}: function '{fn}' does not match spx_{{domain}}_{{entity}}_{{action}}")
+                      else:
+                          if parts[1] not in vocab["domains"]:
+                              errors.append(f"{fpath}: function '{fn}' domain '{parts[1]}' not in allowed domains")
+                          if parts[2] not in vocab["entities"]:
+                              errors.append(f"{fpath}: function '{fn}' entity '{parts[2]}' not in allowed entities")
+                          if parts[3] not in vocab["actions"]:
+                              errors.append(f"{fpath}: function '{fn}' action '{parts[3]}' not in allowed actions")
+
+          if errors:
+              print("CI FAILED: PHP namespace/class/function violations:", file=sys.stderr)
+              for e in errors:
+                  print(f"  {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print("PHP scan: passed")
+          EOF
+
+      - name: Scan JS files for function prefix violations
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys, json
+
+          with open("system/spx-vocab.json") as f:
+              vocab = json.load(f)
+
+          errors = []
+
+          for root, dirs, files in os.walk("src"):
+              for fname in files:
+                  if not fname.endswith(".js") and not fname.endswith(".ts"):
+                      continue
+                  fpath = os.path.join(root, fname)
+                  with open(fpath) as f:
+                      content = f.read()
+
+                  fn_matches = re.findall(r"(?:function\s+|const\s+)(spx_\w+)", content)
+                  for fn in fn_matches:
+                      parts = fn.split("_")
+                      if len(parts) != 4 or parts[0] != "spx":
+                          errors.append(f"{fpath}: function '{fn}' does not match spx_{{domain}}_{{entity}}_{{action}}")
+                      else:
+                          if parts[1] not in vocab["domains"]:
+                              errors.append(f"{fpath}: JS function '{fn}' domain '{parts[1]}' not in allowed domains")
+                          if parts[2] not in vocab["entities"]:
+                              errors.append(f"{fpath}: JS function '{fn}' entity '{parts[2]}' not in allowed entities")
+                          if parts[3] not in vocab["actions"]:
+                              errors.append(f"{fpath}: JS function '{fn}' action '{parts[3]}' not in allowed actions")
+
+          if errors:
+              print("CI FAILED: JS function violations:", file=sys.stderr)
+              for e in errors:
+                  print(f"  {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print("JS scan: passed")
+          EOF
+
+      - name: Scan CSS files for class prefix violations
+        run: |
+          python3 - <<'EOF'
+          import os, re, sys
+
+          errors = []
+
+          for root, dirs, files in os.walk("src"):
+              for fname in files:
+                  if not fname.endswith(".css"):
+                      continue
+                  fpath = os.path.join(root, fname)
+                  with open(fpath) as f:
+                      content = f.read()
+
+                  classes = re.findall(r"\.([\w-]+)\s*\{", content)
+                  for cls in classes:
+                      if not cls.startswith("spx-"):
+                          errors.append(f"{fpath}: CSS class '.{cls}' does not use required 'spx-' prefix")
+
+          if errors:
+              print("CI FAILED: CSS class prefix violations:", file=sys.stderr)
+              for e in errors:
+                  print(f"  {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print("CSS scan: passed")
+          EOF
+
+      - name: Verify file structure mirrors namespace
+        run: |
+          python3 - <<'EOF'
+          import os, sys, json
+
+          with open("system/spx-vocab.json") as f:
+              vocab = json.load(f)
+
+          domains  = [d.capitalize() for d in vocab["domains"]]
+          entities = [e.capitalize() for e in vocab["entities"]]
+
+          errors = []
+
+          if os.path.exists("src"):
+              for domain_dir in os.listdir("src"):
+                  if not os.path.isdir(os.path.join("src", domain_dir)):
+                      continue
+                  if domain_dir not in domains:
+                      errors.append(f"src/{domain_dir}: directory name '{domain_dir}' not a valid PascalCase domain")
+                  else:
+                      for entity_dir in os.listdir(os.path.join("src", domain_dir)):
+                          if not os.path.isdir(os.path.join("src", domain_dir, entity_dir)):
+                              continue
+                          if entity_dir not in entities:
+                              errors.append(f"src/{domain_dir}/{entity_dir}: directory name '{entity_dir}' not a valid PascalCase entity")
+
+          if errors:
+              print("CI FAILED: Filesystem structure violations:", file=sys.stderr)
+              for e in errors:
+                  print(f"  {e}", file=sys.stderr)
+              sys.exit(1)
+
+          print("File structure: passed")
+          EOF
