@@ -1,160 +1,78 @@
 {
-  "version": "2.1.0",
+  "version": "2.2.0",
   "structure": {
     "authorities": {
-      "personal": {
-        "description": "An individual user's private governed space. No shared access."
-      },
-      "group": {
-        "description": "A collective of users with shared governance and access."
-      },
-      "brain": {
-        "description": "A sovereign AI-governed distribution node. Public or semi-public."
-      }
+      "personal": { "description": "An individual user's private governed space. No shared access." },
+      "group":    { "description": "A collective of users with shared governance and access." },
+      "brain":    { "description": "A sovereign AI-governed distribution node. Public or semi-public." }
     },
     "systems": {
-      "sparxstar": {
-        "description": "The SPARXSTAR platform. Primary creative and distribution system."
-      },
-      "aiwa": {
-        "description": "AI West Africa platform. Cultural knowledge governance system."
-      }
+      "sparxstar": { "description": "The SPARXSTAR platform. Primary creative and distribution system." },
+      "aiwa":      { "description": "AI West Africa platform. Cultural knowledge governance system." }
     },
     "products": {
-      "player": {
-        "description": "Playback and consumption surface for media artifacts."
-      },
-      "editor": {
-        "description": "Creation and editing surface for artifacts and lexicon."
-      },
-      "archive": {
-        "description": "Long-term preservation and retrieval of governed content."
-      },
-      "marketplace": {
-        "description": "Exchange surface for governed artifacts and transactions."
-      },
-      "ingestion": {
-        "description": "Intake pipeline for raw artifacts entering the system."
-      }
+      "player":      { "description": "Playback and consumption surface for media artifacts." },
+      "editor":      { "description": "Creation and editing surface for artifacts and lexicon." },
+      "archive":     { "description": "Long-term preservation and retrieval of governed content." },
+      "marketplace": { "description": "Exchange surface for governed artifacts and transactions." },
+      "ingestion":   { "description": "Intake pipeline for raw artifacts entering the system." }
     },
     "subsystems": {
-      "streaming": {
-        "description": "Real-time continuous delivery of audio or media."
-      },
-      "governance": {
-        "description": "Rules, permissions, and policy enforcement layer."
-      },
-      "discovery": {
-        "description": "Search, recommendation, and surfacing of content."
-      },
-      "ingestion": {
-        "description": "Batch or stream intake of raw content."
-      }
+      "streaming":   { "description": "Real-time continuous delivery of audio or media." },
+      "governance":  { "description": "Rules, permissions, and policy enforcement layer." },
+      "discovery":   { "description": "Search, recommendation, and surfacing of content." },
+      "ingestion":   { "description": "Batch or stream intake of raw content." }
     }
   },
   "domains": {
     "artifact": {
       "value": "artifact",
       "description": "A produced, stored, or transmitted content object such as audio, image, or document.",
-      "allowed_entities": [
-        "audio",
-        "image",
-        "document",
-        "video"
-      ]
+      "allowed_entities": ["audio", "image", "document", "video"]
     },
     "lexicon": {
       "value": "lexicon",
       "description": "Language constructs — words, phrases, tokens, and linguistic units.",
-      "allowed_entities": [
-        "word",
-        "phrase",
-        "token"
-      ]
+      "allowed_entities": ["word", "phrase", "token"]
     },
     "context": {
       "value": "context",
       "description": "Session, state, configuration, and environmental runtime data.",
-      "allowed_entities": [
-        "session",
-        "config"
-      ]
+      "allowed_entities": ["session", "config"]
     },
     "wallet": {
       "value": "wallet",
       "description": "Financial and transactional records governing exchange and payment.",
-      "allowed_entities": [
-        "transaction",
-        "invoice",
-        "balance"
-      ]
+      "allowed_entities": ["transaction", "invoice", "balance"]
     }
   },
   "entities": {
     "audio": {
       "value": "audio",
       "description": "A sound artifact — speech, music, or audio recording. Not text derived from audio.",
-      "allowed_actions": [
-        "create",
-        "read",
-        "update",
-        "delete",
-        "transcribe",
-        "validate",
-        "translate",
-        "archive"
-      ],
+      "allowed_actions": ["create", "read", "update", "delete", "transcribe", "validate", "translate", "archive"],
       "disallowed_with": [],
       "specificity_rank": 70
     },
     "word": {
       "value": "word",
       "description": "An atomic lexical unit. A single token of language, not a phrase or sentence.",
-      "allowed_actions": [
-        "create",
-        "read",
-        "update",
-        "delete",
-        "validate",
-        "translate"
-      ],
-      "disallowed_with": [
-        "transcribe"
-      ],
+      "allowed_actions": ["create", "read", "update", "delete", "validate", "translate"],
+      "disallowed_with": ["transcribe"],
       "specificity_rank": 60
     },
     "session": {
       "value": "session",
       "description": "A bounded interaction state between a user or agent and the system.",
-      "allowed_actions": [
-        "create",
-        "read",
-        "update",
-        "delete",
-        "validate",
-        "resolve"
-      ],
-      "disallowed_with": [
-        "transcribe",
-        "translate"
-      ],
+      "allowed_actions": ["create", "read", "update", "delete", "validate", "resolve"],
+      "disallowed_with": ["transcribe", "translate"],
       "specificity_rank": 50
     },
     "transaction": {
       "value": "transaction",
       "description": "A financial or exchange operation with governance and audit trail.",
-      "allowed_actions": [
-        "create",
-        "read",
-        "validate",
-        "resolve",
-        "archive"
-      ],
-      "disallowed_with": [
-        "transcribe",
-        "translate",
-        "update"
-      ],
+      "allowed_actions": ["create", "read", "validate", "resolve", "archive"],
+      "disallowed_with": ["transcribe", "translate", "update"],
       "specificity_rank": 80
     }
   },
@@ -183,12 +101,8 @@
       "value": "transcribe",
       "description": "Convert spoken audio to written text. Input must be audio. Output is text.",
       "specificity_rank": 90,
-      "allowed_domains": [
-        "artifact"
-      ],
-      "allowed_entities": [
-        "audio"
-      ]
+      "allowed_domains": ["artifact"],
+      "allowed_entities": ["audio"]
     },
     "translate": {
       "value": "translate",
@@ -221,54 +135,70 @@
       "specificity_rank": 75
     }
   },
+  "executions": {
+    "stream": {
+      "value": "stream",
+      "description": "Continuous real-time delivery. Data flows as it is produced. No waiting for completion.",
+      "specificity_rank": 80
+    },
+    "batch": {
+      "value": "batch",
+      "description": "Deferred bulk processing. Operation collects inputs and processes them together.",
+      "specificity_rank": 80
+    },
+    "sync": {
+      "value": "sync",
+      "description": "Synchronous execution. Caller waits for the result before continuing.",
+      "specificity_rank": 70
+    },
+    "async": {
+      "value": "async",
+      "description": "Asynchronous execution. Caller continues without waiting. Result delivered later.",
+      "specificity_rank": 70
+    },
+    "queue": {
+      "value": "queue",
+      "description": "Queued execution. Operation is placed in an ordered list for sequential processing.",
+      "specificity_rank": 75
+    }
+  },
   "synonyms": {
-    "speech": "audio",
-    "voice": "audio",
-    "sound": "audio",
-    "text": "word",
-    "token": "word",
-    "tokens": "word",
-    "convert": "transcribe",
-    "handle": "resolve",
-    "process": "resolve",
-    "store": "create",
-    "save": "create",
+    "speech":   "audio",
+    "voice":    "audio",
+    "sound":    "audio",
+    "text":     "word",
+    "token":    "word",
+    "tokens":   "word",
+    "convert":  "transcribe",
+    "handle":   "resolve",
+    "process":  "resolve",
+    "store":    "create",
+    "save":     "create",
     "retrieve": "read",
-    "get": "read",
-    "fetch": "read"
+    "get":      "read",
+    "fetch":    "read"
   },
   "structure_rules": {
-    "case": "lowercase",
-    "separator": "underscore",
-    "order": [
-      "authority",
-      "system",
-      "product"
-    ],
-    "subsystem": "optional_fourth",
-    "hyphens": "forbidden",
-    "abbreviations": "forbidden"
+    "case":            "lowercase",
+    "separator":       "underscore",
+    "order":           ["authority", "system", "product"],
+    "subsystem":       "optional_fourth",
+    "hyphens":         "forbidden",
+    "abbreviations":   "forbidden"
   },
   "composition": {
-    "function": "spx_{authority}_{system}_{product}_{domain}_{entity}_{action}",
-    "class": "SPX\\{AuthorityPascal}\\{SystemPascal}\\{ProductPascal}\\{DomainPascal}\\{EntityPascal}\\{ActionPascal}Service",
-    "route": "/{authority}/{system}/{product}/{domain}/{entity}/{action}",
-    "namespace": "SPX\\{AuthorityPascal}\\{SystemPascal}\\{ProductPascal}\\{DomainPascal}\\{EntityPascal}",
-    "file": "/src/{AuthorityPascal}/{SystemPascal}/{ProductPascal}/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php"
+    "function":            "spx_{authority}_{system}_{product}_{domain}_{entity}_{action}",
+    "function_with_exec":  "spx_{authority}_{system}_{product}_{domain}_{entity}_{action}_{execution}",
+    "class":               "SPX\\{AuthorityPascal}\\{SystemPascal}\\{ProductPascal}\\{DomainPascal}\\{EntityPascal}\\{ActionPascal}Service",
+    "class_with_exec":     "SPX\\{AuthorityPascal}\\{SystemPascal}\\{ProductPascal}\\{DomainPascal}\\{EntityPascal}\\{ActionPascal}{ExecutionPascal}Service",
+    "route":               "/{authority}/{system}/{product}/{domain}/{entity}/{action}",
+    "route_with_exec":     "/{authority}/{system}/{product}/{domain}/{entity}/{action}/{execution}",
+    "namespace":           "SPX\\{AuthorityPascal}\\{SystemPascal}\\{ProductPascal}\\{DomainPascal}\\{EntityPascal}",
+    "file":                "/src/{AuthorityPascal}/{SystemPascal}/{ProductPascal}/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php",
+    "file_with_exec":      "/src/{AuthorityPascal}/{SystemPascal}/{ProductPascal}/{DomainPascal}/{EntityPascal}/{ActionPascal}{ExecutionPascal}Service.php"
   },
-  "allowed_class_suffixes": [
-    "Service"
-  ],
-  "forbidden_class_suffixes": [
-    "Manager",
-    "Engine",
-    "Processor",
-    "Handler",
-    "Pipeline",
-    "Coordinator",
-    "Helper",
-    "Utility"
-  ],
+  "allowed_class_suffixes":  ["Service"],
+  "forbidden_class_suffixes": ["Manager", "Engine", "Processor", "Handler", "Pipeline", "Coordinator", "Helper", "Utility"],
   "machine_states": [
     "VALID",
     "ERR_SCHEMA_MISMATCH",
