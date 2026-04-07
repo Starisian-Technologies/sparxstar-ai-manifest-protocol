@@ -7,7 +7,7 @@ Contract:       CONTRACT.md
 Rule:           Same input + same vocab = SAME output. If not, protocol is incomplete.
 Author:         Claude Sonnet 4.6, made by Anthropic
 Contributor:    Starisian Technology (Max Barrett)
-Version:        2.0.0 — Two-Group Model (Structure Path + Function Signature)
+Version:   2.0.0 — Two-Group Model (Structure Path + Function Signature)
 """
  
 import json
@@ -207,20 +207,21 @@ def validate_constraints(domain, entity, action, vocab):
  
 def compose(structure, coords, vocab):
     """
-    Compose all outputs from both Structure Path and Function Signature.
-    Name = Structure_Path + f(domain, entity, action)
-    All six inputs are from closed sets. Output is deterministic.
+    Compose all outputs from Structure Path and Function Signature.
+    Name = Structure_Path + f(domain, entity, action[, execution])
+    execution is optional. When present it disambiguates HOW the action runs.
+    All inputs are from closed sets. Output is deterministic.
     """
     auth = structure["authority"]
     sys_ = structure["system"]
     prod = structure["product"]
     sub  = structure.get("subsystem")
+    ex   = coords.get("execution")
  
     d = coords["domain"]
     e = coords["entity"]
     a = coords["action"]
  
-    # Structure path string (with optional subsystem)
     if sub:
         struct_flat = f"{auth}_{sys_}_{prod}_{sub}"
         struct_path = f"/{auth}/{sys_}/{prod}/{sub}"
@@ -232,6 +233,17 @@ def compose(structure, coords, vocab):
         struct_ns   = f"{_pascal(auth)}\\{_pascal(sys_)}\\{_pascal(prod)}"
         struct_dir  = f"{_pascal(auth)}/{_pascal(sys_)}/{_pascal(prod)}"
  
+    if ex:
+        function_  = f"spx_{struct_flat}_{d}_{e}_{a}_{ex}"
+        class_     = f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}\\{_pascal(a)}{_pascal(ex)}Service"
+        route_     = f"{struct_path}/{d}/{e}/{a}/{ex}"
+        file_      = f"/src/{struct_dir}/{_pascal(d)}/{_pascal(e)}/{_pascal(a)}{_pascal(ex)}Service.php"
+    else:
+        function_  = f"spx_{struct_flat}_{d}_{e}_{a}"
+        class_     = f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}\\{_pascal(a)}Service"
+        route_     = f"{struct_path}/{d}/{e}/{a}"
+        file_      = f"/src/{struct_dir}/{_pascal(d)}/{_pascal(e)}/{_pascal(a)}Service.php"
+ 
     return {
         "authority":  auth,
         "system":     sys_,
@@ -240,11 +252,12 @@ def compose(structure, coords, vocab):
         "domain":     d,
         "entity":     e,
         "action":     a,
-        "function":   f"spx_{struct_flat}_{d}_{e}_{a}",
-        "class":      f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}\\{_pascal(a)}Service",
-        "route":      f"{struct_path}/{d}/{e}/{a}",
+        "execution":  ex,
+        "function":   function_,
+        "class":      class_,
+        "route":      route_,
         "namespace":  f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}",
-        "file":       f"/src/{struct_dir}/{_pascal(d)}/{_pascal(e)}/{_pascal(a)}Service.php",
+        "file":       file_,
     }
  
  
@@ -287,6 +300,27 @@ def validate_casing(composed):
     return errors
  
  
+def validate_execution(execution_raw, vocab):
+    """
+    Validate optional execution coordinate against closed vocabulary.
+    Returns (execution, errors). If execution_raw is None, returns (None, []).
+    """
+    if execution_raw is None:
+        return None, []
+ 
+    executions = vocab.get("executions", {})
+    token = execution_raw.strip().lower()
+ 
+    if "-" in token:
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' contains hyphen — use underscore"]
+    if token != token.lower():
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' must be lowercase"]
+    if token not in executions:
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' not in allowed executions {sorted(executions.keys())}"]
+ 
+    return token, []
+ 
+ 
 def print_result(composed):
     print(f"authority:  {composed['authority']}")
     print(f"system:     {composed['system']}")
@@ -296,6 +330,8 @@ def print_result(composed):
     print(f"domain:     {composed['domain']}")
     print(f"entity:     {composed['entity']}")
     print(f"action:     {composed['action']}")
+    if composed.get("execution"):
+        print(f"execution:  {composed['execution']}")
     print(f"function:   {composed['function']}")
     print(f"class:      {composed['class']}")
     print(f"route:      {composed['route']}")
@@ -382,6 +418,34 @@ if __name__ == "__main__":
             "inputs":    ("lexicon", "word", "transcribe"),
             "expect_pass": False,
         },
+        {
+            "label": "with execution — stream audio read",
+            "structure":  ("brain", "sparxstar", "player"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "stream",
+            "expect_pass": True,
+        },
+        {
+            "label": "with execution — batch audio read",
+            "structure":  ("brain", "sparxstar", "archive"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "batch",
+            "expect_pass": True,
+        },
+        {
+            "label": "INVALID execution — hyphen [EXPECT FAIL]",
+            "structure":  ("brain", "sparxstar", "player"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "real-time",
+            "expect_pass": False,
+        },
+        {
+            "label": "INVALID execution — invented [EXPECT FAIL]",
+            "structure":  ("brain", "sparxstar", "player"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "turbo",
+            "expect_pass": False,
+        },
     ]
  
     passed = 0
@@ -392,6 +456,7 @@ if __name__ == "__main__":
         struct_t = test["structure"]
         d, e, a  = test["inputs"]
         payload  = test.get("payload")
+        exec_raw = test.get("execution")
         expect_pass = test["expect_pass"]
  
         print(f"--- {label}")
@@ -409,8 +474,21 @@ if __name__ == "__main__":
                 failed += 1
             continue
  
+        # Validate execution coordinate (optional)
+        execution, ex_errors = validate_execution(exec_raw, vocab)
+        if ex_errors:
+            if not expect_pass:
+                print(f"  CORRECTLY FAILED (execution): {'; '.join(ex_errors)}\n")
+                passed += 1
+            else:
+                print(f"  UNEXPECTED EXECUTION FAILURE: {'; '.join(ex_errors)}\n", file=sys.stderr)
+                failed += 1
+            continue
+ 
         # Validate function signature
         coords, f_errors = resolve_coordinates(d, e, a, vocab)
+        if execution is not None:
+            coords["execution"] = execution
  
         if f_errors:
             if not expect_pass:
