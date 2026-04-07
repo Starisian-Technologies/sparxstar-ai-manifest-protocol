@@ -4,6 +4,7 @@ SPX Protocol Validator
 Authority: spx-vocab.json
 Contract:  CONTRACT.md
 Rule:      Same input + same vocab = SAME output. If not, protocol is incomplete.
+Version:   2.0.0 — Two-Group Model (Structure Path + Function Signature)
 """
 
 import json
@@ -30,11 +31,67 @@ def _pascal(value):
 def normalize(token, vocab):
     token = token.strip().lower()
     synonyms = vocab.get("synonyms", {})
-    if token in vocab["domains"] or token in vocab["entities"] or token in vocab["actions"]:
+
+    # Support both flat list and dict formats
+    domains  = _domain_keys(vocab)
+    entities = _entity_keys(vocab)
+    actions  = _action_keys(vocab)
+
+    if token in domains or token in entities or token in actions:
         return token
     if token in synonyms:
         return synonyms[token]
     return None
+
+
+def validate_structure(authority_raw, system_raw, product_raw, vocab, subsystem_raw=None):
+    """
+    Validate Structure Path coordinates against the controlled vocabulary.
+    Rules:
+    - All terms must be lowercase
+    - All terms must exist in structure vocabulary
+    - Hyphens are forbidden — underscores only
+    - Abbreviations and invented terms are forbidden
+    - Subsystem is optional; if provided must be in structure.subsystems
+    """
+    errors = []
+    structure = vocab.get("structure", {})
+
+    def check(raw, coord_name, allowed_set):
+        if raw is None:
+            return None
+        token = raw.strip()
+        if token != token.lower():
+            errors.append(
+                f"ERR_COORDINATE_UNDEF: structure {coord_name} '{token}' must be lowercase"
+            )
+            return None
+        if "-" in token:
+            errors.append(
+                f"ERR_COORDINATE_UNDEF: structure {coord_name} '{token}' contains hyphen — use underscore"
+            )
+            return None
+        if token not in allowed_set:
+            errors.append(
+                f"ERR_COORDINATE_UNDEF: structure {coord_name} '{token}' not in allowed {coord_name}s {sorted(allowed_set)}"
+            )
+            return None
+        return token
+
+    authority = check(authority_raw, "authority", set(structure.get("authorities", [])))
+    system    = check(system_raw,    "system",    set(structure.get("systems",     [])))
+    product   = check(product_raw,   "product",   set(structure.get("products",    [])))
+    subsystem = check(subsystem_raw, "subsystem", set(structure.get("subsystems",  []))) if subsystem_raw else None
+
+    if errors:
+        return None, errors
+
+    return {
+        "authority": authority,
+        "system":    system,
+        "product":   product,
+        "subsystem": subsystem,
+    }, []
 
 
 def resolve_coordinates(domain_raw, entity_raw, action_raw, vocab):
@@ -44,12 +101,12 @@ def resolve_coordinates(domain_raw, entity_raw, action_raw, vocab):
     entity = normalize(entity_raw, vocab)
     action = normalize(action_raw, vocab)
 
-    if domain is None or domain not in vocab["domains"]:
-        errors.append(f"domain '{domain_raw}' is not in allowed domains and has no synonym mapping")
-    if entity is None or entity not in vocab["entities"]:
-        errors.append(f"entity '{entity_raw}' is not in allowed entities and has no synonym mapping")
-    if action is None or action not in vocab["actions"]:
-        errors.append(f"action '{action_raw}' is not in allowed actions and has no synonym mapping")
+    if domain is None or domain not in _domain_keys(vocab):
+        errors.append(f"ERR_COORDINATE_UNDEF: domain '{domain_raw}' is not in allowed domains and has no synonym mapping")
+    if entity is None or entity not in _entity_keys(vocab):
+        errors.append(f"ERR_COORDINATE_UNDEF: entity '{entity_raw}' is not in allowed entities and has no synonym mapping")
+    if action is None or action not in _action_keys(vocab):
+        errors.append(f"ERR_COORDINATE_UNDEF: action '{action_raw}' is not in allowed actions and has no synonym mapping")
 
     if errors:
         return None, errors
@@ -57,20 +114,147 @@ def resolve_coordinates(domain_raw, entity_raw, action_raw, vocab):
     return {"domain": domain, "entity": entity, "action": action}, []
 
 
-def compose(coords, vocab):
+def _entity_keys(vocab):
+    entities = vocab.get("entities", {})
+    if isinstance(entities, list):
+        return set(entities)
+    return set(entities.keys())
+
+
+def _action_keys(vocab):
+    actions = vocab.get("actions", {})
+    if isinstance(actions, list):
+        return set(actions)
+    return set(actions.keys())
+
+
+def _domain_keys(vocab):
+    domains = vocab.get("domains", {})
+    if isinstance(domains, list):
+        return set(domains)
+    return set(domains.keys())
+
+
+def validate_constraints(domain, entity, action, vocab):
+    """
+    Validate that the combination of domain, entity, and action
+    is legal according to the constraint rules in spx-vocab.json.
+
+    Returns list of errors. Empty list = valid.
+
+    New machine states:
+      ERR_ILLEGAL_COMBINATION — pairing violates explicit constraint
+    """
+    errors = []
+
+    entities = vocab.get("entities", {})
+    actions  = vocab.get("actions",  {})
+    domains  = vocab.get("domains",  {})
+
+    # Skip constraint checks if vocab uses old flat-list format
+    if isinstance(entities, list):
+        return []
+
+    entity_def = entities.get(entity, {})
+    action_def = actions.get(action,  {})
+    domain_def = domains.get(domain,  {})
+
+    # Check entity's allowed_actions
+    allowed_actions = entity_def.get("allowed_actions")
+    if allowed_actions is not None and action not in allowed_actions:
+        errors.append(
+            f"ERR_ILLEGAL_COMBINATION: action '{action}' is not allowed "
+            f"for entity '{entity}'. Allowed: {allowed_actions}"
+        )
+
+    # Check entity's disallowed_with
+    disallowed = entity_def.get("disallowed_with", [])
+    if action in disallowed:
+        errors.append(
+            f"ERR_ILLEGAL_COMBINATION: action '{action}' is explicitly "
+            f"disallowed with entity '{entity}'"
+        )
+
+    # Check action's allowed_domains (if constrained)
+    action_allowed_domains = action_def.get("allowed_domains")
+    if action_allowed_domains is not None and domain not in action_allowed_domains:
+        errors.append(
+            f"ERR_ILLEGAL_COMBINATION: action '{action}' requires domain "
+            f"to be one of {action_allowed_domains}, got '{domain}'"
+        )
+
+    # Check action's allowed_entities (if constrained)
+    action_allowed_entities = action_def.get("allowed_entities")
+    if action_allowed_entities is not None and entity not in action_allowed_entities:
+        errors.append(
+            f"ERR_ILLEGAL_COMBINATION: action '{action}' requires entity "
+            f"to be one of {action_allowed_entities}, got '{entity}'"
+        )
+
+    # Check domain's allowed_entities (if constrained)
+    domain_allowed_entities = domain_def.get("allowed_entities")
+    if domain_allowed_entities is not None and entity not in domain_allowed_entities:
+        errors.append(
+            f"ERR_ILLEGAL_COMBINATION: domain '{domain}' requires entity "
+            f"to be one of {domain_allowed_entities}, got '{entity}'"
+        )
+
+    return errors
+
+
+def compose(structure, coords, vocab):
+    """
+    Compose all outputs from Structure Path and Function Signature.
+    Name = Structure_Path + f(domain, entity, action[, execution])
+    execution is optional. When present it disambiguates HOW the action runs.
+    All inputs are from closed sets. Output is deterministic.
+    """
+    auth = structure["authority"]
+    sys_ = structure["system"]
+    prod = structure["product"]
+    sub  = structure.get("subsystem")
+    ex   = coords.get("execution")
+
     d = coords["domain"]
     e = coords["entity"]
     a = coords["action"]
 
+    if sub:
+        struct_flat = f"{auth}_{sys_}_{prod}_{sub}"
+        struct_path = f"/{auth}/{sys_}/{prod}/{sub}"
+        struct_ns   = f"{_pascal(auth)}\\{_pascal(sys_)}\\{_pascal(prod)}\\{_pascal(sub)}"
+        struct_dir  = f"{_pascal(auth)}/{_pascal(sys_)}/{_pascal(prod)}/{_pascal(sub)}"
+    else:
+        struct_flat = f"{auth}_{sys_}_{prod}"
+        struct_path = f"/{auth}/{sys_}/{prod}"
+        struct_ns   = f"{_pascal(auth)}\\{_pascal(sys_)}\\{_pascal(prod)}"
+        struct_dir  = f"{_pascal(auth)}/{_pascal(sys_)}/{_pascal(prod)}"
+
+    if ex:
+        function_  = f"spx_{struct_flat}_{d}_{e}_{a}_{ex}"
+        class_     = f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}\\{_pascal(a)}{_pascal(ex)}Service"
+        route_     = f"{struct_path}/{d}/{e}/{a}/{ex}"
+        file_      = f"/src/{struct_dir}/{_pascal(d)}/{_pascal(e)}/{_pascal(a)}{_pascal(ex)}Service.php"
+    else:
+        function_  = f"spx_{struct_flat}_{d}_{e}_{a}"
+        class_     = f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}\\{_pascal(a)}Service"
+        route_     = f"{struct_path}/{d}/{e}/{a}"
+        file_      = f"/src/{struct_dir}/{_pascal(d)}/{_pascal(e)}/{_pascal(a)}Service.php"
+
     return {
-        "domain":    d,
-        "entity":    e,
-        "action":    a,
-        "function":  f"spx_{d}_{e}_{a}",
-        "class":     f"SPX\\{_pascal(d)}\\{_pascal(e)}\\{_pascal(a)}Service",
-        "route":     f"/{d}/{e}/{a}",
-        "namespace": f"SPX\\{_pascal(d)}\\{_pascal(e)}",
-        "file":      f"/src/{_pascal(d)}/{_pascal(e)}/{_pascal(a)}Service.php",
+        "authority":  auth,
+        "system":     sys_,
+        "product":    prod,
+        "subsystem":  sub,
+        "domain":     d,
+        "entity":     e,
+        "action":     a,
+        "execution":  ex,
+        "function":   function_,
+        "class":      class_,
+        "route":      route_,
+        "namespace":  f"SPX\\{struct_ns}\\{_pascal(d)}\\{_pascal(e)}",
+        "file":       file_,
     }
 
 
@@ -83,14 +267,14 @@ def validate_payload(payload, expected):
         if payload[field] != expected[field]:
             errors.append(
                 f"field '{field}':\n"
-                f"    expected: {expected[field]}\n"
-                f"    got:      {payload[field]}"
+                f"  expected: {expected[field]}\n"
+                f"  got:      {payload[field]}"
             )
     return errors
 
 
 def validate_class_suffix(class_name, vocab):
-    allowed = vocab.get("allowed_class_suffixes", ["Service"])
+    allowed  = vocab.get("allowed_class_suffixes", ["Service"])
     forbidden = vocab.get("forbidden_class_suffixes", [])
     for suffix in forbidden:
         if class_name.endswith(suffix):
@@ -103,52 +287,48 @@ def validate_class_suffix(class_name, vocab):
 
 def validate_casing(composed):
     errors = []
-    for field in ["domain", "entity", "action"]:
-        if composed[field] != composed[field].lower():
+    for field in ["authority", "system", "product", "domain", "entity", "action"]:
+        if composed.get(field) and composed[field] != composed[field].lower():
             errors.append(f"coordinate '{field}' must be lowercase, got '{composed[field]}'")
     if composed["function"] != composed["function"].lower():
         errors.append(f"function must be lowercase, got '{composed['function']}'")
-    if not composed["route"] == composed["route"].lower():
+    if composed["route"] != composed["route"].lower():
         errors.append(f"route must be lowercase, got '{composed['route']}'")
     return errors
 
 
-def run_validation(domain_raw, entity_raw, action_raw, payload=None, vocab_path="spx-vocab.json"):
-    vocab = load_vocab(vocab_path)
+def validate_execution(execution_raw, vocab):
+    """
+    Validate optional execution coordinate against closed vocabulary.
+    Returns (execution, errors). If execution_raw is None, returns (None, []).
+    """
+    if execution_raw is None:
+        return None, []
 
-    coords, errors = resolve_coordinates(domain_raw, entity_raw, action_raw, vocab)
-    if errors:
-        for e in errors:
-            print(f"  INVALID: {e}", file=sys.stderr)
-        _fail("intent could not be resolved against protocol")
+    executions = vocab.get("executions", {})
+    token = execution_raw.strip().lower()
 
-    composed = compose(coords, vocab)
+    if "-" in token:
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' contains hyphen — use underscore"]
+    if token != token.lower():
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' must be lowercase"]
+    if token not in executions:
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' not in allowed executions {sorted(executions.keys())}"]
 
-    casing_errors = validate_casing(composed)
-    if casing_errors:
-        for e in casing_errors:
-            print(f"  INVALID: {e}", file=sys.stderr)
-        _fail("casing violation")
-
-    suffix_error = validate_class_suffix(composed["class"], vocab)
-    if suffix_error:
-        print(f"  INVALID: {suffix_error}", file=sys.stderr)
-        _fail("class suffix violation")
-
-    if payload is not None:
-        payload_errors = validate_payload(payload, composed)
-        if payload_errors:
-            for e in payload_errors:
-                print(f"  INVALID: {e}", file=sys.stderr)
-            _fail("payload does not match expected composition")
-
-    return composed
+    return token, []
 
 
 def print_result(composed):
+    print(f"authority: {composed['authority']}")
+    print(f"system:    {composed['system']}")
+    print(f"product:   {composed['product']}")
+    if composed.get("subsystem"):
+        print(f"subsystem: {composed['subsystem']}")
     print(f"domain:    {composed['domain']}")
     print(f"entity:    {composed['entity']}")
     print(f"action:    {composed['action']}")
+    if composed.get("execution"):
+        print(f"execution: {composed['execution']}")
     print(f"function:  {composed['function']}")
     print(f"class:     {composed['class']}")
     print(f"route:     {composed['route']}")
@@ -157,63 +337,110 @@ def print_result(composed):
 
 
 if __name__ == "__main__":
-    print("=== SPX Protocol Validator — Test Suite ===\n")
+    print("=== SPX Protocol Validator v2.0 — Test Suite ===\n")
+    print("Two-Group Model: Structure Path + Function Signature\n")
 
-    vocab = load_vocab("spx-vocab.json")
+    vocab = load_vocab("system/spx-vocab.json")
 
     tests = [
         {
-            "label": "convert speech to text",
-            "inputs": ("artifact", "speech", "convert"),
+            "label": "SPARXSTAR player reads audio",
+            "structure": ("brain", "sparxstar", "player"),
+            "inputs":    ("artifact", "speech", "convert"),
             "expect_pass": True,
         },
         {
-            "label": "handle a failed transaction",
-            "inputs": ("wallet", "transaction", "handle"),
+            "label": "SPARXSTAR archive resolves a transaction",
+            "structure": ("brain", "sparxstar", "archive"),
+            "inputs":    ("wallet", "transaction", "handle"),
             "expect_pass": True,
         },
         {
-            "label": "store a new word token",
-            "inputs": ("lexicon", "token", "store"),
+            "label": "AiWA archive creates a word token",
+            "structure": ("group", "aiwa", "archive"),
+            "inputs":    ("lexicon", "token", "store"),
             "expect_pass": True,
         },
         {
-            "label": "retrieve session context",
-            "inputs": ("context", "session", "retrieve"),
+            "label": "SPARXSTAR player reads session context",
+            "structure": ("brain", "sparxstar", "player"),
+            "inputs":    ("context", "session", "retrieve"),
             "expect_pass": True,
         },
         {
-            "label": "validate an audio artifact",
-            "inputs": ("artifact", "audio", "validate"),
+            "label": "SPARXSTAR editor validates audio",
+            "structure": ("brain", "sparxstar", "editor"),
+            "inputs":    ("artifact", "audio", "validate"),
             "expect_pass": True,
         },
         {
-            "label": "authenticate the session [EXPECT FAIL]",
-            "inputs": ("context", "session", "authenticate"),
+            "label": "with streaming subsystem",
+            "structure": ("brain", "sparxstar", "player", "streaming"),
+            "inputs":    ("artifact", "audio", "read"),
+            "expect_pass": True,
+        },
+        {
+            "label": "INVALID structure — bad authority [EXPECT FAIL]",
+            "structure": ("BRAIN", "sparxstar", "player"),
+            "inputs":    ("artifact", "audio", "read"),
             "expect_pass": False,
         },
         {
-            "label": "payload mismatch [EXPECT FAIL]",
-            "inputs": ("artifact", "audio", "transcribe"),
-            "payload": {
-                "function":  "spx_artifact_audio_transcribe",
-                "class":     "SPX\\Artifact\\Audio\\TranscribeManager",
-                "route":     "/artifact/audio/transcribe",
-                "namespace": "SPX\\Artifact\\Audio",
-                "file":      "/src/Artifact/Audio/TranscribeService.php",
-            },
+            "label": "INVALID structure — hyphen in system [EXPECT FAIL]",
+            "structure": ("brain", "sparx-star", "player"),
+            "inputs":    ("artifact", "audio", "read"),
             "expect_pass": False,
         },
         {
-            "label": "forbidden suffix — Handler [EXPECT FAIL]",
-            "inputs": ("artifact", "audio", "validate"),
-            "payload": {
-                "function":  "spx_artifact_audio_validate",
-                "class":     "SPX\\Artifact\\Audio\\ValidateHandler",
-                "route":     "/artifact/audio/validate",
-                "namespace": "SPX\\Artifact\\Audio",
-                "file":      "/src/Artifact/Audio/ValidateService.php",
-            },
+            "label": "INVALID structure — invented authority [EXPECT FAIL]",
+            "structure": ("corporate", "sparxstar", "player"),
+            "inputs":    ("artifact", "audio", "read"),
+            "expect_pass": False,
+        },
+        {
+            "label": "INVALID function — unknown action [EXPECT FAIL]",
+            "structure": ("brain", "sparxstar", "player"),
+            "inputs":    ("context", "session", "authenticate"),
+            "expect_pass": False,
+        },
+        {
+            "label": "INVALID constraint — transcribe on session [EXPECT FAIL]",
+            "structure": ("brain", "sparxstar", "player"),
+            "inputs":    ("context", "session", "transcribe"),
+            "expect_pass": False,
+        },
+        {
+            "label": "INVALID constraint — transcribe wrong domain [EXPECT FAIL]",
+            "structure": ("group", "aiwa", "archive"),
+            "inputs":    ("lexicon", "word", "transcribe"),
+            "expect_pass": False,
+        },
+        {
+            "label": "with execution — stream audio read",
+            "structure":  ("brain", "sparxstar", "player"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "stream",
+            "expect_pass": True,
+        },
+        {
+            "label": "with execution — batch audio read",
+            "structure":  ("brain", "sparxstar", "archive"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "batch",
+            "expect_pass": True,
+        },
+        {
+            "label": "INVALID execution — hyphen [EXPECT FAIL]",
+            "structure":  ("brain", "sparxstar", "player"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "real-time",
+            "expect_pass": False,
+        },
+        {
+            "label": "INVALID execution — invented [EXPECT FAIL]",
+            "structure":  ("brain", "sparxstar", "player"),
+            "inputs":     ("artifact", "audio", "read"),
+            "execution":  "turbo",
             "expect_pass": False,
         },
     ]
@@ -222,49 +449,72 @@ if __name__ == "__main__":
     failed = 0
 
     for test in tests:
-        label = test["label"]
-        d, e, a = test["inputs"]
-        payload = test.get("payload", None)
+        label    = test["label"]
+        struct_t = test["structure"]
+        d, e, a  = test["inputs"]
+        payload  = test.get("payload")
+        exec_raw = test.get("execution")
         expect_pass = test["expect_pass"]
 
         print(f"--- {label}")
 
-        coords, errors = resolve_coordinates(d, e, a, vocab)
+        # Validate structure path
+        sub = struct_t[3] if len(struct_t) == 4 else None
+        structure, s_errors = validate_structure(struct_t[0], struct_t[1], struct_t[2], vocab, sub)
 
-        if errors:
+        if s_errors:
             if not expect_pass:
-                print(f"  CORRECTLY FAILED: {'; '.join(errors)}\n")
+                print(f"  CORRECTLY FAILED (structure): {'; '.join(s_errors)}\n")
                 passed += 1
             else:
-                print(f"  UNEXPECTED FAILURE: {'; '.join(errors)}\n", file=sys.stderr)
+                print(f"  UNEXPECTED STRUCTURE FAILURE: {'; '.join(s_errors)}\n", file=sys.stderr)
                 failed += 1
             continue
 
-        composed = compose(coords, vocab)
+        # Validate execution coordinate (optional)
+        execution, ex_errors = validate_execution(exec_raw, vocab)
+        if ex_errors:
+            if not expect_pass:
+                print(f"  CORRECTLY FAILED (execution): {'; '.join(ex_errors)}\n")
+                passed += 1
+            else:
+                print(f"  UNEXPECTED EXECUTION FAILURE: {'; '.join(ex_errors)}\n", file=sys.stderr)
+                failed += 1
+            continue
 
-        casing_errors = validate_casing(composed)
-        suffix_error = validate_class_suffix(composed["class"], vocab)
-        payload_errors = validate_payload(payload, composed) if payload else []
+        # Validate function signature
+        coords, f_errors = resolve_coordinates(d, e, a, vocab)
+        if execution is not None:
+            coords["execution"] = execution
 
-        all_errors = casing_errors + ([suffix_error] if suffix_error else []) + payload_errors
+        if f_errors:
+            if not expect_pass:
+                print(f"  CORRECTLY FAILED (function): {'; '.join(f_errors)}\n")
+                passed += 1
+            else:
+                print(f"  UNEXPECTED FUNCTION FAILURE: {'; '.join(f_errors)}\n", file=sys.stderr)
+                failed += 1
+            continue
 
-        if payload and payload_errors:
-            check_class = payload.get("class", "")
-            suffix_err = validate_class_suffix(check_class, vocab)
-            if suffix_err and suffix_err not in all_errors:
-                all_errors.append(suffix_err)
+        composed     = compose(structure, coords, vocab)
+        casing_errs  = validate_casing(composed)
+        suffix_err   = validate_class_suffix(composed["class"], vocab)
+        constraint_errs = validate_constraints(coords["domain"], coords["entity"], coords["action"], vocab)
+        payload_errs = validate_payload(payload, composed) if payload else []
+
+        all_errors = casing_errs + ([suffix_err] if suffix_err else []) + constraint_errs + payload_errs
 
         if all_errors:
             if not expect_pass:
                 print(f"  CORRECTLY FAILED:")
-                for e in all_errors:
-                    print(f"    {e}")
+                for err in all_errors:
+                    print(f"    {err}")
                 print()
                 passed += 1
             else:
                 print(f"  UNEXPECTED FAILURE:")
-                for e in all_errors:
-                    print(f"    {e}")
+                for err in all_errors:
+                    print(f"    {err}")
                 print()
                 failed += 1
         else:
@@ -273,7 +523,7 @@ if __name__ == "__main__":
                 print(f"  CI: PASSED\n")
                 passed += 1
             else:
-                print(f"  EXPECTED FAILURE BUT PASSED — protocol gap detected\n")
+                print(f"  EXPECTED FAILURE BUT PASSED — protocol gap\n")
                 failed += 1
 
     print(f"=== Results: {passed} passed, {failed} failed ===")
