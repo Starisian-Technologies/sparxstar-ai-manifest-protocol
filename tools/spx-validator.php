@@ -37,9 +37,48 @@ if (!is_array($vocab)) {
     exit(1);
 }
 
-$domains  = array_map('strtolower', (array) ($vocab['domains']  ?? []));
-$entities = array_map('strtolower', (array) ($vocab['entities'] ?? []));
-$actions  = array_map('strtolower', (array) ($vocab['actions']  ?? []));
+// ---------------------------------------------------------------------------
+// Helper: extract canonical keys from either flat-list or dict-style vocab
+// ---------------------------------------------------------------------------
+
+function spxVocabKeys(array $vocab, string $key): array
+{
+    $val = $vocab[$key] ?? [];
+    if (!is_array($val)) {
+        return [];
+    }
+    // Flat list: ['audio', 'word', ...]
+    if (!empty($val) && is_string(array_key_first($val))) {
+        return array_map('strtolower', array_keys($val));
+    }
+    return array_map('strtolower', $val);
+}
+
+// ---------------------------------------------------------------------------
+// Helper: extract keys from a nested structure sub-key
+// ---------------------------------------------------------------------------
+
+function spxStructureKeys(array $vocab, string $subKey): array
+{
+    $structure = $vocab['structure'] ?? [];
+    $val = $structure[$subKey] ?? [];
+    if (!is_array($val)) {
+        return [];
+    }
+    if (!empty($val) && is_string(array_key_first($val))) {
+        return array_map('strtolower', array_keys($val));
+    }
+    return array_map('strtolower', $val);
+}
+
+$domains     = spxVocabKeys($vocab, 'domains');
+$entities    = spxVocabKeys($vocab, 'entities');
+$actions     = spxVocabKeys($vocab, 'actions');
+$executions  = spxVocabKeys($vocab, 'executions');
+$authorities = spxStructureKeys($vocab, 'authorities');
+$systems     = spxStructureKeys($vocab, 'systems');
+$products    = spxStructureKeys($vocab, 'products');
+$subsystems  = spxStructureKeys($vocab, 'subsystems');
 
 if (empty($domains) || empty($entities) || empty($actions)) {
     fwrite(STDERR, "ERROR: Vocab file must define non-empty 'domains', 'entities', and 'actions'.\n");
@@ -94,47 +133,45 @@ foreach ($phpFiles as $file) {
     $fileErrors   = [];
 
     // -----------------------------------------------------------------------
-    // Parse the relative path: src/{Domain}/{Entity}/{Action}Service.php
+    // Skip protocol-internal infrastructure (not a domain service)
+    // -----------------------------------------------------------------------
+
+    if (strpos($relativePath, 'src/Protocol/') === 0) {
+        --$checked;
+        continue;
+    }
+
+    // -----------------------------------------------------------------------
+    // Parse the relative path.
+    //
+    // Legacy (3-coord):  src/{Domain}/{Entity}/{Action}Service.php  — 4 segments
+    // Full protocol:     src/{Auth}/{Sys}/{Prod}/{Domain}/{Entity}/{Action}Service.php — 7 segments
+    // Full + subsystem:  src/{Auth}/{Sys}/{Prod}/{Sub}/{Domain}/{Entity}/{Action}Service.php — 8 segments
     // -----------------------------------------------------------------------
 
     $pathSegments = explode('/', str_replace('\\', '/', $relativePath));
+    $segCount     = count($pathSegments);
 
-    // Expected: ['src', DomainPascal, EntityPascal, ActionPascalService.php]
-    if (count($pathSegments) !== 4 || $pathSegments[0] !== 'src') {
+    // Minimum: src + at least Domain + Entity + File = 4
+    // Maximum so far: 8 (with subsystem)
+    if ($segCount < 4 || $pathSegments[0] !== 'src') {
         $fileErrors[] = sprintf(
-            "  File path: expected 'src/{Domain}/{Entity}/{Action}Service.php', got '%s'",
+            "  File path: expected 'src/.../{Action}Service.php' structure, got '%s'",
             $relativePath
         );
+        $pathFileName     = null;
+        $pathActionPascal = null;
+        $pathDomainPascal = null;
+        $pathEntityPascal = null;
+        $nsDomainPascal   = null;
+        $nsEntityPascal   = null;
     } else {
-        $pathDomainPascal = $pathSegments[1];
-        $pathEntityPascal = $pathSegments[2];
-        $pathFileName     = $pathSegments[3];
+        $pathFileName = $pathSegments[$segCount - 1];
 
-        $pathDomain = strtolower($pathDomainPascal);
-        $pathEntity = strtolower($pathEntityPascal);
-
-        // Validate domain in path
-        if (!in_array($pathDomain, $domains, true)) {
+        // File name must be {Action}Service.php
+        if (!preg_match('/^([A-Z][A-Za-z]+)Service(?:[A-Z][A-Za-z]+)?\.php$/', $pathFileName, $fileNameMatch)) {
             $fileErrors[] = sprintf(
-                "  Path domain: expected one of [%s], got '%s'",
-                implode(', ', $domains),
-                $pathDomain
-            );
-        }
-
-        // Validate entity in path
-        if (!in_array($pathEntity, $entities, true)) {
-            $fileErrors[] = sprintf(
-                "  Path entity: expected one of [%s], got '%s'",
-                implode(', ', $entities),
-                $pathEntity
-            );
-        }
-
-        // Validate file name: {Action}Service.php
-        if (!preg_match('/^([A-Z][a-z]+)Service\.php$/', $pathFileName, $fileNameMatch)) {
-            $fileErrors[] = sprintf(
-                "  File name: expected '{Action}Service.php' (PascalCase action), got '%s'",
+                "  File name: expected '{Action}[{Execution}]Service.php' (PascalCase), got '%s'",
                 $pathFileName
             );
             $pathActionPascal = null;
@@ -142,11 +179,83 @@ foreach ($phpFiles as $file) {
             $pathActionPascal = $fileNameMatch[1];
             $pathAction       = strtolower($pathActionPascal);
 
-            if (!in_array($pathAction, $actions, true)) {
+            if (!in_array($pathAction, $actions, true) && !in_array($pathAction, $executions, true)) {
                 $fileErrors[] = sprintf(
                     "  Path action: expected one of [%s], got '%s'",
                     implode(', ', $actions),
                     $pathAction
+                );
+            }
+        }
+
+        // Identify Domain and Entity position based on segment count
+        // Legacy 4-segment: src/Domain/Entity/File.php
+        // Full 7-segment:   src/Auth/Sys/Prod/Domain/Entity/File.php
+        // Full 8-segment:   src/Auth/Sys/Prod/Sub/Domain/Entity/File.php
+        if ($segCount === 4) {
+            // Legacy
+            $pathDomainPascal = $pathSegments[1];
+            $pathEntityPascal = $pathSegments[2];
+        } elseif ($segCount === 7) {
+            // Full protocol: src/Auth/Sys/Prod/Domain/Entity/File
+            $pathAuthPascal   = $pathSegments[1];
+            $pathSysPascal    = $pathSegments[2];
+            $pathProdPascal   = $pathSegments[3];
+            $pathDomainPascal = $pathSegments[4];
+            $pathEntityPascal = $pathSegments[5];
+
+            if (!empty($authorities) && !in_array(strtolower($pathAuthPascal), $authorities, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path authority: expected one of [%s], got '%s'",
+                    implode(', ', $authorities),
+                    strtolower($pathAuthPascal)
+                );
+            }
+            if (!empty($systems) && !in_array(strtolower($pathSysPascal), $systems, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path system: expected one of [%s], got '%s'",
+                    implode(', ', $systems),
+                    strtolower($pathSysPascal)
+                );
+            }
+            if (!empty($products) && !in_array(strtolower($pathProdPascal), $products, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path product: expected one of [%s], got '%s'",
+                    implode(', ', $products),
+                    strtolower($pathProdPascal)
+                );
+            }
+        } elseif ($segCount === 8) {
+            // Full + subsystem: src/Auth/Sys/Prod/Sub/Domain/Entity/File
+            $pathDomainPascal = $pathSegments[5];
+            $pathEntityPascal = $pathSegments[6];
+        } else {
+            $fileErrors[] = sprintf(
+                "  File path: unexpected depth (got %d segments), expected 4 (legacy), 7 (full), or 8 (full+subsystem) in '%s'",
+                $segCount,
+                $relativePath
+            );
+            $pathDomainPascal = null;
+            $pathEntityPascal = null;
+        }
+
+        if (isset($pathDomainPascal, $pathEntityPascal)) {
+            $pathDomain = strtolower($pathDomainPascal);
+            $pathEntity = strtolower($pathEntityPascal);
+
+            if (!in_array($pathDomain, $domains, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path domain: expected one of [%s], got '%s'",
+                    implode(', ', $domains),
+                    $pathDomain
+                );
+            }
+
+            if (!in_array($pathEntity, $entities, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path entity: expected one of [%s], got '%s'",
+                    implode(', ', $entities),
+                    $pathEntity
                 );
             }
         }
@@ -163,16 +272,25 @@ foreach ($phpFiles as $file) {
     }
 
     // -----------------------------------------------------------------------
-    // Rule 1: Namespace format — SPX\{Domain}\{Entity}
+    // Rule 1: Namespace format
+    //
+    // Legacy:        SPX\{Domain}\{Entity}                  (3 parts)
+    // Full protocol: SPX\{Auth}\{Sys}\{Prod}\{Domain}\{Entity} (6 parts)
+    // Full+sub:      SPX\{Auth}\{Sys}\{Prod}\{Sub}\{Domain}\{Entity} (7 parts)
     // -----------------------------------------------------------------------
 
-    if (!preg_match('/^\s*namespace\s+(SPX\\\\([A-Za-z]+)\\\\([A-Za-z]+))\s*;/m', $source, $nsMatch)) {
-        $fileErrors[] = "  Namespace: expected 'SPX\\{Domain}\\{Entity}', none found or wrong format";
+    if (!preg_match('/^\s*namespace\s+(SPX(?:\\\\[A-Za-z]+){2,6})\s*;/m', $source, $nsMatch)) {
+        $fileErrors[] = "  Namespace: expected 'SPX\\...\\{Domain}\\{Entity}', none found or wrong format";
         $nsDomain = $nsEntity = null;
+        $nsDomainPascal = $nsEntityPascal = null;
     } else {
-        $fullNamespace = $nsMatch[1];
-        $nsDomainPascal = $nsMatch[2];
-        $nsEntityPascal = $nsMatch[3];
+        $fullNamespace  = $nsMatch[1];
+        $nsParts        = explode('\\', $fullNamespace);
+        $partCount      = count($nsParts); // includes 'SPX'
+
+        // Last two parts are always Domain, Entity
+        $nsDomainPascal = $nsParts[$partCount - 2];
+        $nsEntityPascal = $nsParts[$partCount - 1];
         $nsDomain       = strtolower($nsDomainPascal);
         $nsEntity       = strtolower($nsEntityPascal);
 
@@ -192,6 +310,19 @@ foreach ($phpFiles as $file) {
                 $nsEntity,
                 $fullNamespace
             );
+        }
+
+        // If full protocol (6+ parts: SPX\Auth\Sys\Prod\...\Domain\Entity), validate structure coords
+        if ($partCount >= 5 && !empty($authorities)) {
+            $nsAuth = strtolower($nsParts[1]);
+            if (!in_array($nsAuth, $authorities, true)) {
+                $fileErrors[] = sprintf(
+                    "  Namespace authority: expected one of [%s], got '%s' (in '%s')",
+                    implode(', ', $authorities),
+                    $nsAuth,
+                    $fullNamespace
+                );
+            }
         }
     }
 
@@ -226,13 +357,17 @@ foreach ($phpFiles as $file) {
     }
 
     // -----------------------------------------------------------------------
-    // Rule 3: Function names — spx_{domain}_{entity}_{action}
+    // Rule 3: Function names
+    //
+    // Legacy:        spx_{domain}_{entity}_{action}                  (4 parts)
+    // Full protocol: spx_{auth}_{sys}_{prod}_{domain}_{entity}_{action}      (7 parts)
+    // Full+sub:      spx_{auth}_{sys}_{prod}_{sub}_{domain}_{entity}_{action} (8 parts)
+    // Full+exec:     spx_{auth}_{sys}_{prod}_{domain}_{entity}_{action}_{exec} (8 parts)
     // -----------------------------------------------------------------------
 
-    preg_match_all('/^\s*function\s+(spx_([a-z]+)_([a-z]+)_([a-z]+))\s*\(/m', $source, $funcMatches, PREG_SET_ORDER);
+    preg_match_all('/^\s*function\s+(spx_[a-z_]+)\s*\(/m', $source, $funcMatches, PREG_SET_ORDER);
 
     if (empty($funcMatches)) {
-        // Only flag missing function if there are no functions at all, or only wrongly named ones
         preg_match_all('/^\s*function\s+([a-zA-Z_]+)\s*\(/m', $source, $allFuncMatches, PREG_SET_ORDER);
         $nonSpxFunctions = array_filter(
             $allFuncMatches,
@@ -242,17 +377,76 @@ foreach ($phpFiles as $file) {
         if (!empty($nonSpxFunctions)) {
             foreach ($nonSpxFunctions as $nf) {
                 $fileErrors[] = sprintf(
-                    "  Function name: expected 'spx_{domain}_{entity}_{action}', got '%s'",
+                    "  Function name: expected 'spx_{...}_{domain}_{entity}_{action}', got '%s'",
                     $nf[1]
                 );
             }
         }
     } else {
         foreach ($funcMatches as $funcMatch) {
-            $funcName       = $funcMatch[1];
-            $funcDomain     = $funcMatch[2];
-            $funcEntity     = $funcMatch[3];
-            $funcAction     = $funcMatch[4];
+            $funcName  = $funcMatch[1];
+            $funcParts = explode('_', $funcName); // ['spx', ...]
+            $partCount = count($funcParts);
+
+            // Must start with 'spx' and have at least 4 parts (legacy minimum)
+            if ($funcParts[0] !== 'spx' || $partCount < 4) {
+                $fileErrors[] = sprintf(
+                    "  Function name: must start with 'spx_' and have domain/entity/action, got '%s'",
+                    $funcName
+                );
+                continue;
+            }
+
+            if ($partCount === 4) {
+                // Legacy: spx_domain_entity_action
+                $funcDomain = $funcParts[1];
+                $funcEntity = $funcParts[2];
+                $funcAction = $funcParts[3];
+            } elseif ($partCount === 7) {
+                // Full protocol: spx_auth_sys_prod_domain_entity_action
+                $funcDomain = $funcParts[4];
+                $funcEntity = $funcParts[5];
+                $funcAction = $funcParts[6];
+                if (!empty($authorities) && !in_array($funcParts[1], $authorities, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Function authority: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $authorities),
+                        $funcParts[1],
+                        $funcName
+                    );
+                }
+            } elseif ($partCount === 8) {
+                // Full+sub or full+exec: spx_auth_sys_prod_{sub_or_domain}_entity_action_{exec_or_nothing}
+                // Domain is always in positions 4 or 5 — determine by vocab membership
+                $candidate4 = $funcParts[4];
+                $candidate5 = $funcParts[5];
+                if (in_array($candidate4, $domains, true)) {
+                    // spx_auth_sys_prod_domain_entity_action_exec
+                    $funcDomain = $candidate4;
+                    $funcEntity = $candidate5;
+                    $funcAction = $funcParts[6];
+                } else {
+                    // spx_auth_sys_prod_sub_domain_entity_action
+                    $funcDomain = $candidate5;
+                    $funcEntity = $funcParts[6];
+                    $funcAction = $funcParts[7];
+                }
+                if (!empty($authorities) && !in_array($funcParts[1], $authorities, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Function authority: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $authorities),
+                        $funcParts[1],
+                        $funcName
+                    );
+                }
+            } else {
+                $fileErrors[] = sprintf(
+                    "  Function name: unexpected part count (%d) in '%s'; expected 4 (legacy), 7, or 8 (full protocol)",
+                    $partCount,
+                    $funcName
+                );
+                continue;
+            }
 
             if (!in_array($funcDomain, $domains, true)) {
                 $fileErrors[] = sprintf(
@@ -326,11 +520,10 @@ foreach ($phpFiles as $file) {
     }
 
     // -----------------------------------------------------------------------
-    // Rule 6: File path must match /src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
-    //         and be consistent with namespace + class
+    // Rule 6: File path must be consistent with namespace + class
     // -----------------------------------------------------------------------
 
-    if (isset($pathDomainPascal, $pathEntityPascal, $pathActionPascal, $nsDomainPascal, $nsEntityPascal)) {
+    if (isset($pathDomainPascal, $pathEntityPascal, $nsDomainPascal, $nsEntityPascal)) {
         if ($pathDomainPascal !== $nsDomainPascal) {
             $fileErrors[] = sprintf(
                 "  Path/namespace mismatch (domain): path has '%s', namespace has '%s'",

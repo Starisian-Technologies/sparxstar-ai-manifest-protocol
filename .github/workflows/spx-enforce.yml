@@ -34,7 +34,7 @@ jobs:
           try:
               with open('system/spx-vocab.json') as f:
                   vocab = json.load(f)
-              required = ['domains', 'entities', 'actions', 'synonyms', 'composition', 'allowed_class_suffixes']
+              required = ['domains', 'entities', 'actions', 'synonyms', 'composition', 'allowed_class_suffixes', 'structure']
               missing = [k for k in required if k not in vocab]
               if missing:
                   print(f'CI FAILED: spx-vocab.json missing required keys: {missing}', file=sys.stderr)
@@ -56,14 +56,39 @@ jobs:
           with open("system/spx-vocab.json") as f:
               vocab = json.load(f)
 
-          domains  = [d.capitalize() for d in vocab["domains"]]
-          entities = [e.capitalize() for e in vocab["entities"]]
-          allowed_suffixes  = vocab.get("allowed_class_suffixes", ["Service"])
+          def vocab_keys(section):
+              v = vocab.get(section, {})
+              if isinstance(v, list):
+                  return [x.capitalize() for x in v]
+              return [k.capitalize() for k in v.keys()]
+
+          def vocab_keys_lower(section):
+              v = vocab.get(section, {})
+              if isinstance(v, list):
+                  return set(v)
+              return set(v.keys())
+
+          def structure_keys_lower(sub):
+              return set(vocab.get("structure", {}).get(sub, {}).keys())
+
+          domains_lower   = vocab_keys_lower("domains")
+          entities_lower  = vocab_keys_lower("entities")
+          actions_lower   = vocab_keys_lower("actions")
+          executions_lower = vocab_keys_lower("executions")
+          authorities_lower = structure_keys_lower("authorities")
+          systems_lower   = structure_keys_lower("systems")
+          products_lower  = structure_keys_lower("products")
+
+          allowed_suffixes   = vocab.get("allowed_class_suffixes", ["Service"])
           forbidden_suffixes = vocab.get("forbidden_class_suffixes", [])
 
           errors = []
 
+          PROTOCOL_INTERNAL = {"Protocol"}  # excluded from domain-entity enforcement
+
           for root, dirs, files in os.walk("src"):
+              # Skip protocol-internal directories
+              dirs[:] = [d for d in dirs if d not in PROTOCOL_INTERNAL]
               for fname in files:
                   if not fname.endswith(".php"):
                       continue
@@ -72,17 +97,31 @@ jobs:
                   with open(fpath) as f:
                       content = f.read()
 
-                  ns_match = re.search(r"^namespace\s+(SPX\\[^\s;]+)", content, re.MULTILINE)
+                  ns_match = re.search(r"^namespace\s+(SPX(?:\\[^\s;]+)+)", content, re.MULTILINE)
                   if ns_match:
                       ns = ns_match.group(1)
                       parts = ns.split("\\")
-                      if len(parts) != 3:
-                          errors.append(f"{fpath}: namespace '{ns}' must be exactly SPX\\Domain\\Entity")
+                      # parts[0] = SPX, rest = coord segments
+                      # Minimum: SPX\Domain\Entity = 3 parts
+                      # Legacy:          SPX\Domain\Entity         len=3
+                      # Full:            SPX\Auth\Sys\Prod\Domain\Entity len=6
+                      # Full+sub:        SPX\Auth\Sys\Prod\Sub\Domain\Entity len=7
+                      if len(parts) < 3:
+                          errors.append(f"{fpath}: namespace '{ns}' must have at least SPX\\Domain\\Entity")
                       else:
-                          if parts[1] not in domains:
-                              errors.append(f"{fpath}: namespace domain '{parts[1]}' not in allowed domains {domains}")
-                          if parts[2] not in entities:
-                              errors.append(f"{fpath}: namespace entity '{parts[2]}' not in allowed entities {entities}")
+                          domain_pascal  = parts[-2]
+                          entity_pascal  = parts[-1]
+                          domain_lower   = domain_pascal.lower()
+                          entity_lower   = entity_pascal.lower()
+                          if domain_lower not in domains_lower:
+                              errors.append(f"{fpath}: namespace domain '{domain_pascal}' not in allowed domains {sorted(domains_lower)}")
+                          if entity_lower not in entities_lower:
+                              errors.append(f"{fpath}: namespace entity '{entity_pascal}' not in allowed entities {sorted(entities_lower)}")
+                          # Full protocol: validate authority at parts[1]
+                          if len(parts) >= 5 and authorities_lower:
+                              auth_lower = parts[1].lower()
+                              if auth_lower not in authorities_lower:
+                                  errors.append(f"{fpath}: namespace authority '{parts[1]}' not in allowed authorities {sorted(authorities_lower)}")
 
                   class_match = re.search(r"^class\s+(\w+)", content, re.MULTILINE)
                   if class_match:
@@ -97,15 +136,37 @@ jobs:
                   fn_matches = re.findall(r"function\s+(spx_\w+)\s*\(", content)
                   for fn in fn_matches:
                       parts = fn.split("_")
-                      if len(parts) != 4 or parts[0] != "spx":
-                          errors.append(f"{fpath}: function '{fn}' does not match spx_{{domain}}_{{entity}}_{{action}}")
+                      n = len(parts)
+                      # Legacy:    spx_domain_entity_action        (4 parts)
+                      # Full:      spx_auth_sys_prod_domain_entity_action (7 parts)
+                      # Full+exec: spx_auth_sys_prod_domain_entity_action_exec (8 parts)
+                      # Full+sub:  spx_auth_sys_prod_sub_domain_entity_action  (8 parts)
+                      if parts[0] != "spx" or n < 4:
+                          errors.append(f"{fpath}: function '{fn}' must start with 'spx_' and include domain/entity/action")
+                          continue
+                      if n == 4:
+                          d, e, a = parts[1], parts[2], parts[3]
+                      elif n == 7:
+                          d, e, a = parts[4], parts[5], parts[6]
+                          if authorities_lower and parts[1] not in authorities_lower:
+                              errors.append(f"{fpath}: function '{fn}' authority '{parts[1]}' not in allowed authorities")
+                      elif n == 8:
+                          # Disambiguate: sub+domain+entity+action vs domain+entity+action+exec
+                          if parts[4] in domains_lower:
+                              d, e, a = parts[4], parts[5], parts[6]
+                          else:
+                              d, e, a = parts[5], parts[6], parts[7]
+                          if authorities_lower and parts[1] not in authorities_lower:
+                              errors.append(f"{fpath}: function '{fn}' authority '{parts[1]}' not in allowed authorities")
                       else:
-                          if parts[1] not in vocab["domains"]:
-                              errors.append(f"{fpath}: function '{fn}' domain '{parts[1]}' not in allowed domains")
-                          if parts[2] not in vocab["entities"]:
-                              errors.append(f"{fpath}: function '{fn}' entity '{parts[2]}' not in allowed entities")
-                          if parts[3] not in vocab["actions"]:
-                              errors.append(f"{fpath}: function '{fn}' action '{parts[3]}' not in allowed actions")
+                          errors.append(f"{fpath}: function '{fn}' has unexpected part count {n}")
+                          continue
+                      if d not in domains_lower:
+                          errors.append(f"{fpath}: function '{fn}' domain '{d}' not in allowed domains")
+                      if e not in entities_lower:
+                          errors.append(f"{fpath}: function '{fn}' entity '{e}' not in allowed entities")
+                      if a not in actions_lower and a not in executions_lower:
+                          errors.append(f"{fpath}: function '{fn}' action '{a}' not in allowed actions")
 
           if errors:
               print("CI FAILED: PHP namespace/class/function violations:", file=sys.stderr)
@@ -124,6 +185,18 @@ jobs:
           with open("system/spx-vocab.json") as f:
               vocab = json.load(f)
 
+          def vocab_keys_lower(section):
+              v = vocab.get(section, {})
+              if isinstance(v, list):
+                  return set(v)
+              return set(v.keys())
+
+          domains_lower    = vocab_keys_lower("domains")
+          entities_lower   = vocab_keys_lower("entities")
+          actions_lower    = vocab_keys_lower("actions")
+          executions_lower = vocab_keys_lower("executions")
+          authorities_lower = set(vocab.get("structure", {}).get("authorities", {}).keys())
+
           errors = []
 
           for root, dirs, files in os.walk("src"):
@@ -137,15 +210,28 @@ jobs:
                   fn_matches = re.findall(r"(?:function\s+|const\s+)(spx_\w+)", content)
                   for fn in fn_matches:
                       parts = fn.split("_")
-                      if len(parts) != 4 or parts[0] != "spx":
-                          errors.append(f"{fpath}: function '{fn}' does not match spx_{{domain}}_{{entity}}_{{action}}")
+                      n = len(parts)
+                      if parts[0] != "spx" or n < 4:
+                          errors.append(f"{fpath}: JS function '{fn}' must start with 'spx_' and include domain/entity/action")
+                          continue
+                      if n == 4:
+                          d, e, a = parts[1], parts[2], parts[3]
+                      elif n == 7:
+                          d, e, a = parts[4], parts[5], parts[6]
+                      elif n == 8:
+                          if parts[4] in domains_lower:
+                              d, e, a = parts[4], parts[5], parts[6]
+                          else:
+                              d, e, a = parts[5], parts[6], parts[7]
                       else:
-                          if parts[1] not in vocab["domains"]:
-                              errors.append(f"{fpath}: JS function '{fn}' domain '{parts[1]}' not in allowed domains")
-                          if parts[2] not in vocab["entities"]:
-                              errors.append(f"{fpath}: JS function '{fn}' entity '{parts[2]}' not in allowed entities")
-                          if parts[3] not in vocab["actions"]:
-                              errors.append(f"{fpath}: JS function '{fn}' action '{parts[3]}' not in allowed actions")
+                          errors.append(f"{fpath}: JS function '{fn}' has unexpected part count {n}")
+                          continue
+                      if d not in domains_lower:
+                          errors.append(f"{fpath}: JS function '{fn}' domain '{d}' not in allowed domains")
+                      if e not in entities_lower:
+                          errors.append(f"{fpath}: JS function '{fn}' entity '{e}' not in allowed entities")
+                      if a not in actions_lower and a not in executions_lower:
+                          errors.append(f"{fpath}: JS function '{fn}' action '{a}' not in allowed actions")
 
           if errors:
               print("CI FAILED: JS function violations:", file=sys.stderr)
@@ -193,23 +279,61 @@ jobs:
           with open("system/spx-vocab.json") as f:
               vocab = json.load(f)
 
-          domains  = [d.capitalize() for d in vocab["domains"]]
-          entities = [e.capitalize() for e in vocab["entities"]]
+          def vocab_pascal_set(section):
+              v = vocab.get(section, {})
+              if isinstance(v, list):
+                  return {x.capitalize() for x in v}
+              return {k.capitalize() for k in v.keys()}
+
+          def structure_pascal_set(sub):
+              return {k.capitalize() for k in vocab.get("structure", {}).get(sub, {}).keys()}
+
+          domains_pascal    = vocab_pascal_set("domains")
+          entities_pascal   = vocab_pascal_set("entities")
+          authorities_pascal = structure_pascal_set("authorities")
+          systems_pascal    = structure_pascal_set("systems")
+          products_pascal   = structure_pascal_set("products")
+          subsystems_pascal = structure_pascal_set("subsystems")
+
+          # Protocol-internal directories that are NOT domain-entity directories
+          PROTOCOL_INTERNAL = {"Protocol"}
 
           errors = []
 
           if os.path.exists("src"):
-              for domain_dir in os.listdir("src"):
-                  if not os.path.isdir(os.path.join("src", domain_dir)):
+              for top_dir in os.listdir("src"):
+                  top_path = os.path.join("src", top_dir)
+                  if not os.path.isdir(top_path):
                       continue
-                  if domain_dir not in domains:
-                      errors.append(f"src/{domain_dir}: directory name '{domain_dir}' not a valid PascalCase domain")
-                  else:
-                      for entity_dir in os.listdir(os.path.join("src", domain_dir)):
-                          if not os.path.isdir(os.path.join("src", domain_dir, entity_dir)):
+                  # Skip protocol-internal
+                  if top_dir in PROTOCOL_INTERNAL:
+                      continue
+
+                  if top_dir in domains_pascal:
+                      # Legacy path: src/Domain/Entity/
+                      for entity_dir in os.listdir(top_path):
+                          if not os.path.isdir(os.path.join(top_path, entity_dir)):
                               continue
-                          if entity_dir not in entities:
-                              errors.append(f"src/{domain_dir}/{entity_dir}: directory name '{entity_dir}' not a valid PascalCase entity")
+                          if entity_dir not in entities_pascal:
+                              errors.append(f"src/{top_dir}/{entity_dir}: directory name '{entity_dir}' not a valid PascalCase entity")
+                  elif top_dir in authorities_pascal:
+                      # Full-protocol path: src/Authority/System/Product/...
+                      for sys_dir in os.listdir(top_path):
+                          sys_path = os.path.join(top_path, sys_dir)
+                          if not os.path.isdir(sys_path):
+                              continue
+                          if sys_dir not in systems_pascal:
+                              errors.append(f"src/{top_dir}/{sys_dir}: directory name '{sys_dir}' not a valid PascalCase system")
+                              continue
+                          for prod_dir in os.listdir(sys_path):
+                              prod_path = os.path.join(sys_path, prod_dir)
+                              if not os.path.isdir(prod_path):
+                                  continue
+                              if prod_dir not in products_pascal:
+                                  errors.append(f"src/{top_dir}/{sys_dir}/{prod_dir}: directory name '{prod_dir}' not a valid PascalCase product")
+                              # Further depth is domain/entity or sub/domain/entity — accept any valid PascalCase
+                  else:
+                      errors.append(f"src/{top_dir}: directory name '{top_dir}' is not a valid PascalCase domain or authority")
 
           if errors:
               print("CI FAILED: Filesystem structure violations:", file=sys.stderr)

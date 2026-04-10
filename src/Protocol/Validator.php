@@ -16,13 +16,15 @@ class Validator
 {
     private array $vocab;
 
-    public function __construct(string $vocabPath = __DIR__ . '/../../spx-vocab.json')
+    public function __construct(?string $vocabPath = null)
     {
+        $vocabPath = $vocabPath ?? dirname(__DIR__, 2) . '/system/spx-vocab.json';
+
         if (!file_exists($vocabPath)) {
             throw new \RuntimeException("SPX PROTOCOL ERROR: vocab file not found at '{$vocabPath}'");
         }
 
-        $decoded = json_decode(file_get_contents($vocabPath), true);
+        $decoded = json_decode((string) file_get_contents($vocabPath), true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
             throw new \RuntimeException("SPX PROTOCOL ERROR: spx-vocab.json is not valid JSON");
@@ -34,23 +36,66 @@ class Validator
     /**
      * Normalize a raw token against the synonym map and allowed values.
      * Returns null if unmappable.
+     *
+     * Supports both flat-list and dict-style (v2.x) vocab.
      */
     public function normalize(string $token, string $coordinate): ?string
     {
-        $token = strtolower(trim($token));
-        $allowed = $this->vocab[$coordinate . 's'] ?? [];
+        $token        = strtolower(trim($token));
+        $allowedLookup = $this->getAllowedCoordinateLookup($coordinate);
 
-        if (in_array($token, $allowed, true)) {
+        if (isset($allowedLookup[$token])) {
             return $token;
         }
 
         $synonym = $this->vocab['synonyms'][$token] ?? null;
 
-        if ($synonym !== null && in_array($synonym, $allowed, true)) {
-            return $synonym;
+        if (is_string($synonym)) {
+            $synonym = strtolower(trim($synonym));
+            if (isset($allowedLookup[$synonym])) {
+                return $synonym;
+            }
         }
 
         return null;
+    }
+
+    /**
+     * Build a canonical lookup table for a coordinate collection.
+     *
+     * Supports:
+     * - flat lists of strings;
+     * - associative arrays keyed by canonical token;
+     * - nested arrays containing a string 'value' field.
+     *
+     * @return array<string, true>
+     */
+    private function getAllowedCoordinateLookup(string $coordinate): array
+    {
+        $rawAllowed = $this->vocab[$coordinate . 's'] ?? [];
+
+        if (!is_array($rawAllowed)) {
+            return [];
+        }
+
+        $lookup = [];
+
+        foreach ($rawAllowed as $key => $definition) {
+            if (is_string($key) && $key !== '') {
+                $lookup[strtolower(trim($key))] = true;
+            }
+
+            if (is_string($definition) && $definition !== '') {
+                $lookup[strtolower(trim($definition))] = true;
+                continue;
+            }
+
+            if (is_array($definition) && isset($definition['value']) && is_string($definition['value']) && $definition['value'] !== '') {
+                $lookup[strtolower(trim($definition['value']))] = true;
+            }
+        }
+
+        return $lookup;
     }
 
     /**

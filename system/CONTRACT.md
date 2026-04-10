@@ -43,43 +43,89 @@ This file explains the system. It does not override the machine-readable protoco
 
 If this file conflicts with spx-vocab.json or the validator, the machine-readable protocol wins.
 
-## 3. Closed Vocabulary Protocol
+## 3. Coordinate Protocol — Two-Group Model
 
-All executable naming must be derived from exactly three coordinates:
+All executable naming is derived from two groups:
 
+**Group 1 — Structure Path (WHERE)**
+- authority
+- system
+- product
+- subsystem (optional)
+
+**Group 2 — Function Signature (WHAT + HOW)**
 - domain
 - entity
 - action
+- execution (optional)
 
-Only one domain, one entity, and one action may be selected for a single valid mapping.
+Only one value per coordinate may be selected for a single valid mapping.
 
-No extra coordinates may be inserted.
-No coordinate may be omitted.
+No coordinate may be omitted except optional `subsystem` and optional `execution`.
+
+No coordinate may be invented outside the defined vocabulary.
 
 ## 4. Allowed Values
 
 The allowed values are defined in spx-vocab.json.
 
-**Domains:**
+**Structure Path — Group 1:**
+
+Authorities:
+- personal
+- group
+- brain
+
+Systems:
+- sparxstar
+- aiwa
+
+Products:
+- player
+- editor
+- archive
+- marketplace
+- ingestion
+
+Subsystems (optional):
+- streaming
+- governance
+- discovery
+- ingestion
+
+**Function Signature — Group 2:**
+
+Domains:
 - artifact
 - lexicon
 - context
 - wallet
 
-**Entities:**
+Entities:
 - audio
 - word
 - session
 - transaction
 
-**Actions:**
+Actions:
 - create
 - read
 - update
 - delete
 - transcribe
+- translate
 - validate
 - resolve
+- archive
+- execute
+- publish
+
+Executions (optional):
+- stream
+- batch
+- sync
+- async
+- queue
 
 These values are closed.
 
@@ -139,29 +185,44 @@ System MUST NOT:
 
 These are NOT invention. They are deterministic outputs.
 
-**Function:**
+**Function (without execution):**
 ```
-spx_{domain}_{entity}_{action}
+spx_{authority}_{system}_{product}_{domain}_{entity}_{action}
+```
+
+**Function (with optional subsystem):**
+```
+spx_{authority}_{system}_{product}_{subsystem}_{domain}_{entity}_{action}
+```
+
+**Function (with optional execution):**
+```
+spx_{authority}_{system}_{product}_{domain}_{entity}_{action}_{execution}
 ```
 
 **Class:**
 ```
-SPX\{DomainPascal}\{EntityPascal}\{ActionPascal}Service
+SPX\{AuthorityPascal}\{SystemPascal}\{ProductPascal}\{DomainPascal}\{EntityPascal}\{ActionPascal}Service
+```
+
+**Class (with optional execution):**
+```
+SPX\{AuthorityPascal}\{SystemPascal}\{ProductPascal}\{DomainPascal}\{EntityPascal}\{ActionPascal}{ExecutionPascal}Service
 ```
 
 **Route:**
 ```
-/{domain}/{entity}/{action}
+/{authority}/{system}/{product}/{domain}/{entity}/{action}
 ```
 
 **Namespace:**
 ```
-SPX\{DomainPascal}\{EntityPascal}
+SPX\{AuthorityPascal}\{SystemPascal}\{ProductPascal}\{DomainPascal}\{EntityPascal}
 ```
 
 **File:**
 ```
-/src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
+/src/{AuthorityPascal}/{SystemPascal}/{ProductPascal}/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
 ```
 
 Composition is mandatory. Composition is not invention.
@@ -201,33 +262,42 @@ Example: if token → word, then tokens → word must also be explicitly mapped.
 
 No agent may assume singularization unless the protocol declares it.
 
-## 13. Authority
+## 13. Structure Path
 
-Authority is runtime ONLY.
+Structure Path coordinates (authority, system, product, subsystem) are first-class coordinates that appear in all output identifiers as Group 1.
 
-Authority must never appear in:
-- namespace
-- class
-- function
-- route
-- file path
+Structure coordinates MUST appear in:
+- namespace (first three segments after `SPX\`)
+- function name (positions 2–4 after `spx_`)
+- class (first three PascalCase segments after `SPX\`)
+- route (first three path segments)
+- file path (first three directory segments under `/src/`)
 
-**Valid:**
+**Valid function:**
 ```
-context['authority'] = 'aqua_caliente'
+spx_brain_sparxstar_player_artifact_audio_transcribe
 ```
 
-**Invalid:**
+**Valid namespace:**
 ```
-AquaCaliente\SPX\Artifact\Audio\TranscribeService
-/aqua-caliente/artifact/audio/transcribe
-spx_aqua_caliente_artifact_audio_transcribe
+SPX\Brain\Sparxstar\Player\Artifact\Audio
+```
+
+**Invalid (structure coordinates missing):**
+```
+spx_artifact_audio_transcribe
+SPX\Artifact\Audio\TranscribeService
 ```
 
 ## 14. Filesystem
 
 ```
-/src/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
+/src/{AuthorityPascal}/{SystemPascal}/{ProductPascal}/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
+```
+
+With optional subsystem:
+```
+/src/{AuthorityPascal}/{SystemPascal}/{ProductPascal}/{SubsystemPascal}/{DomainPascal}/{EntityPascal}/{ActionPascal}Service.php
 ```
 
 No additional structural hierarchy may be introduced unless formally defined by protocol amendment.
@@ -235,10 +305,12 @@ No additional structural hierarchy may be introduced unless formally defined by 
 ## 15. Namespace
 
 ```
-SPX\{DomainPascal}\{EntityPascal}
+SPX\{AuthorityPascal}\{SystemPascal}\{ProductPascal}\{DomainPascal}\{EntityPascal}
 ```
 
-No extra namespace layers for company, brand, product, authority, or environment.
+No extra namespace layers for environment or runtime context.
+
+Protocol-internal infrastructure classes (e.g. `SPX\Protocol\Validator`) are excluded from domain-enforcement scans.
 
 ## 16. Class Type (STRICT)
 
@@ -262,22 +334,32 @@ Forbidden:
 ## 17. Output Format (STRICT)
 
 ```
+authority:
+system:
+product:
 domain:
 entity:
 action:
 function:
 class:
 route:
+namespace:
+file:
 ```
 
 Example:
 ```
-domain:   artifact
-entity:   audio
-action:   transcribe
-function: spx_artifact_audio_transcribe
-class:    SPX\Artifact\Audio\TranscribeService
-route:    /artifact/audio/transcribe
+authority: brain
+system:    sparxstar
+product:   player
+domain:    artifact
+entity:    audio
+action:    transcribe
+function:  spx_brain_sparxstar_player_artifact_audio_transcribe
+class:     SPX\Brain\Sparxstar\Player\Artifact\Audio\TranscribeService
+route:     /brain/sparxstar/player/artifact/audio/transcribe
+namespace: SPX\Brain\Sparxstar\Player\Artifact\Audio
+file:      /src/Brain/Sparxstar/Player/Artifact/Audio/TranscribeService.php
 ```
 
 Any alternate output format is invalid unless explicitly requested by a separate protocol.
