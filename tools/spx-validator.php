@@ -47,10 +47,11 @@ function spxVocabKeys(array $vocab, string $key): array
     if (!is_array($val)) {
         return [];
     }
-    // Flat list: ['audio', 'word', ...]
+    // Dict-style: ['audio' => [...], 'word' => [...]] — keys are the canonical tokens
     if (!empty($val) && is_string(array_key_first($val))) {
         return array_map('strtolower', array_keys($val));
     }
+    // Flat list: ['audio', 'word', ...]
     return array_map('strtolower', $val);
 }
 
@@ -65,9 +66,11 @@ function spxStructureKeys(array $vocab, string $subKey): array
     if (!is_array($val)) {
         return [];
     }
+    // Dict-style: ['brain' => [...], 'group' => [...]] — keys are canonical tokens
     if (!empty($val) && is_string(array_key_first($val))) {
         return array_map('strtolower', array_keys($val));
     }
+    // Flat list fallback
     return array_map('strtolower', $val);
 }
 
@@ -168,23 +171,47 @@ foreach ($phpFiles as $file) {
     } else {
         $pathFileName = $pathSegments[$segCount - 1];
 
-        // File name must be {Action}Service.php
-        if (!preg_match('/^([A-Z][A-Za-z]+)Service(?:[A-Z][A-Za-z]+)?\.php$/', $pathFileName, $fileNameMatch)) {
+        // File name must be {Action}[{Execution}]Service.php
+        // Split the stem before "Service.php" to get the action (and optional execution) parts.
+        if (!preg_match('/^([A-Z][A-Za-z]+?)(?:([A-Z][A-Za-z]+))?Service\.php$/', $pathFileName, $fileNameMatch)) {
             $fileErrors[] = sprintf(
                 "  File name: expected '{Action}[{Execution}]Service.php' (PascalCase), got '%s'",
                 $pathFileName
             );
             $pathActionPascal = null;
         } else {
-            $pathActionPascal = $fileNameMatch[1];
-            $pathAction       = strtolower($pathActionPascal);
+            // Check if the full PascalCase stem before "Service" is a single action
+            // or an action+execution compound (e.g. ReadStream = Read + Stream)
+            $fullStem     = $fileNameMatch[1] . ($fileNameMatch[2] ?? '');
+            $stemLower    = strtolower($fullStem);
+            $part1Lower   = strtolower($fileNameMatch[1]);
+            $part2        = $fileNameMatch[2] ?? null;
+            $part2Lower   = $part2 !== null ? strtolower($part2) : null;
 
-            if (!in_array($pathAction, $actions, true) && !in_array($pathAction, $executions, true)) {
+            if (in_array($stemLower, $actions, true)) {
+                // Single action: e.g. TranscribeService.php
+                $pathActionPascal = $fullStem;
+                $pathAction       = $stemLower;
+            } elseif (in_array($part1Lower, $actions, true)) {
+                // Action + optional execution: e.g. ReadStreamService.php
+                $pathActionPascal = $fileNameMatch[1];
+                $pathAction       = $part1Lower;
+                if ($part2Lower !== null && !in_array($part2Lower, $executions, true)) {
+                    $fileErrors[] = sprintf(
+                        "  File execution: '%s' is not in allowed executions [%s] (in '%s')",
+                        $part2Lower,
+                        implode(', ', $executions),
+                        $pathFileName
+                    );
+                }
+            } else {
                 $fileErrors[] = sprintf(
                     "  Path action: expected one of [%s], got '%s'",
                     implode(', ', $actions),
-                    $pathAction
+                    $part1Lower
                 );
+                $pathActionPascal = null;
+                $pathAction       = null;
             }
         }
 
@@ -227,8 +254,41 @@ foreach ($phpFiles as $file) {
             }
         } elseif ($segCount === 8) {
             // Full + subsystem: src/Auth/Sys/Prod/Sub/Domain/Entity/File
+            $pathAuthPascal   = $pathSegments[1];
+            $pathSysPascal    = $pathSegments[2];
+            $pathProdPascal   = $pathSegments[3];
+            $pathSubPascal    = $pathSegments[4];
             $pathDomainPascal = $pathSegments[5];
             $pathEntityPascal = $pathSegments[6];
+
+            if (!empty($authorities) && !in_array(strtolower($pathAuthPascal), $authorities, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path authority: expected one of [%s], got '%s'",
+                    implode(', ', $authorities),
+                    strtolower($pathAuthPascal)
+                );
+            }
+            if (!empty($systems) && !in_array(strtolower($pathSysPascal), $systems, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path system: expected one of [%s], got '%s'",
+                    implode(', ', $systems),
+                    strtolower($pathSysPascal)
+                );
+            }
+            if (!empty($products) && !in_array(strtolower($pathProdPascal), $products, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path product: expected one of [%s], got '%s'",
+                    implode(', ', $products),
+                    strtolower($pathProdPascal)
+                );
+            }
+            if (!empty($subsystems) && !in_array(strtolower($pathSubPascal), $subsystems, true)) {
+                $fileErrors[] = sprintf(
+                    "  Path subsystem: expected one of [%s], got '%s'",
+                    implode(', ', $subsystems),
+                    strtolower($pathSubPascal)
+                );
+            }
         } else {
             $fileErrors[] = sprintf(
                 "  File path: unexpected depth (got %d segments), expected 4 (legacy), 7 (full), or 8 (full+subsystem) in '%s'",

@@ -151,10 +151,15 @@ jobs:
                           if authorities_lower and parts[1] not in authorities_lower:
                               errors.append(f"{fpath}: function '{fn}' authority '{parts[1]}' not in allowed authorities")
                       elif n == 8:
-                          # Disambiguate: sub+domain+entity+action vs domain+entity+action+exec
+                          # Disambiguate: domain+entity+action+exec vs sub+domain+entity+action
                           if parts[4] in domains_lower:
+                              # spx_auth_sys_prod_domain_entity_action_exec
                               d, e, a = parts[4], parts[5], parts[6]
+                              exec_part = parts[7]
+                              if exec_part not in executions_lower:
+                                  errors.append(f"{fpath}: function '{fn}' execution '{exec_part}' not in allowed executions {sorted(executions_lower)}")
                           else:
+                              # spx_auth_sys_prod_sub_domain_entity_action
                               d, e, a = parts[5], parts[6], parts[7]
                           if authorities_lower and parts[1] not in authorities_lower:
                               errors.append(f"{fpath}: function '{fn}' authority '{parts[1]}' not in allowed authorities")
@@ -220,8 +225,13 @@ jobs:
                           d, e, a = parts[4], parts[5], parts[6]
                       elif n == 8:
                           if parts[4] in domains_lower:
+                              # domain+entity+action+exec format
                               d, e, a = parts[4], parts[5], parts[6]
+                              exec_part = parts[7]
+                              if exec_part not in executions_lower:
+                                  errors.append(f"{fpath}: JS function '{fn}' execution '{exec_part}' not in allowed executions {sorted(executions_lower)}")
                           else:
+                              # sub+domain+entity+action format
                               d, e, a = parts[5], parts[6], parts[7]
                       else:
                           errors.append(f"{fpath}: JS function '{fn}' has unexpected part count {n}")
