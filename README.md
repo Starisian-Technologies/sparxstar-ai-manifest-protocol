@@ -11,19 +11,35 @@ This eliminates ambiguity, prevents informal naming, and makes the codebase mach
 ## Vocabulary Authority
 
 `system/spx-vocab.json` is the single source of truth.
-It defines the permitted `domains`, `entities`, `actions`, and `synonyms`.
-No term may be used in any identifier unless it is listed there.
+It defines the permitted protocol coordinates for `authority`, `system`, `product`, optional `subsystem`, optional `execution`, and `synonyms`.
+No term may be used in any identifier unless it is listed there and used in the correct protocol position.
 
 ## Naming Rules
 
+All identifiers follow the Two-Group Model:
+
+**Group 1 — Structure Path (WHERE):** `authority`, `system`, `product`, `[subsystem]`
+
+**Group 2 — Function Signature (WHAT + HOW):** `domain`, `entity`, `action`, `[execution]`
+
 | Element | Pattern |
 |---|---|
-| PHP namespace | `SPX\{Domain}\{Entity}` |
-| PHP class | `{Action}Service` |
-| PHP function | `spx_{domain}_{entity}_{action}` |
-| File path | `src/{Domain}/{Entity}/{Action}Service.php` |
+| PHP namespace | `SPX\{Authority}\{System}\{Product}\{Domain}\{Entity}` |
+| PHP class | `{Action}[{Execution}]Service` |
+| PHP function | `spx_{authority}_{system}_{product}_{domain}_{entity}_{action}[_{execution}]` |
+| File path | `src/{Authority}/{System}/{Product}/{Domain}/{Entity}/{Action}[{Execution}]Service.php` |
 
-All segments must match terms in `system/spx-vocab.json`.
+With optional subsystem:
+
+| Element | Pattern |
+|---|---|
+| PHP namespace | `SPX\{Authority}\{System}\{Product}\{Subsystem}\{Domain}\{Entity}` |
+| PHP function | `spx_{authority}_{system}_{product}_{subsystem}_{domain}_{entity}_{action}` |
+| File path | `src/{Authority}/{System}/{Product}/{Subsystem}/{Domain}/{Entity}/{Action}Service.php` |
+
+Legacy 3-coordinate format (`spx_{domain}_{entity}_{action}`) is accepted for backward compatibility.
+
+All required coordinates must match terms in `system/spx-vocab.json`, and optional `subsystem` / `execution` coordinates may only be used where permitted by the protocol authority.
 
 ## CI Enforcement
 
