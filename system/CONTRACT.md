@@ -312,6 +312,8 @@ No extra namespace layers for environment or runtime context.
 
 Protocol-internal infrastructure classes (e.g. `SPX\Protocol\Validator`) are excluded from domain-enforcement scans.
 
+**Protocol Namespace Exemption:** The `src/Protocol/` directory and `SPX\Protocol` namespace are exempt from SPX naming enforcement. `Protocol` is not a domain in `spx-vocab.json` and must never be treated as one. It is the protocol runtime itself — the enforcement mechanism — not a governed service artifact. Validators must skip files under `src/Protocol/` when checking for domain-entity compliance.
+
 ## 16. Class Type (STRICT)
 
 Only allowed:
