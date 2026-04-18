@@ -1,0 +1,49 @@
+name: SPX Protocol Enforcement
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  spx-validate:
+    name: SPX Protocol Validator
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify spx-vocab.json exists
+        run: |
+          if [ ! -f system/spx-vocab.json ]; then
+            echo "CI FAILED: spx-vocab.json not found. Protocol authority file is required."
+            exit 1
+          fi
+
+      - name: Validate spx-vocab.json is valid JSON
+        run: |
+          python3 -c "
+          import json, sys
+          try:
+              with open('system/spx-vocab.json') as f:
+                  vocab = json.load(f)
+              required = ['domains', 'entities', 'actions', 'synonyms', 'composition', 'allowed_class_suffixes', 'structure']
+              missing = [k for k in required if k not in vocab]
+              if missing:
+                  print(f'CI FAILED: spx-vocab.json missing required keys: {missing}', file=sys.stderr)
+                  sys.exit(1)
+              print('spx-vocab.json: valid')
+          except json.JSONDecodeError as e:
+              print(f'CI FAILED: spx-vocab.json is not valid JSON: {e}', file=sys.stderr)
+              sys.exit(1)
+          "
+
+      - name: Run SPX protocol validator (authoritative)
+        run: python3 tools/spx_validator.py
