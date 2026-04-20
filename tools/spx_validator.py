@@ -306,12 +306,14 @@ def validate_execution(execution_raw, vocab):
         return None, []
 
     executions = vocab.get("executions", {})
-    token = execution_raw.strip().lower()
+    token_raw = execution_raw.strip()
 
-    if "-" in token:
-        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' contains hyphen — use underscore"]
-    if token != token.lower():
-        return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' must be lowercase"]
+    if "-" in token_raw:
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token_raw}' contains hyphen — use underscore"]
+    if token_raw != token_raw.lower():
+        return None, [f"ERR_COORDINATE_UNDEF: execution '{token_raw}' must be lowercase"]
+
+    token = token_raw.lower()
     if token not in executions:
         return None, [f"ERR_COORDINATE_UNDEF: execution '{token}' not in allowed executions {sorted(executions.keys())}"]
 
