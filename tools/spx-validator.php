@@ -372,16 +372,59 @@ foreach ($phpFiles as $file) {
             );
         }
 
-        // If full protocol (6+ parts: SPX\Auth\Sys\Prod\...\Domain\Entity), validate structure coords
-        if ($partCount >= 5 && !empty($authorities)) {
-            $nsAuth = strtolower($nsParts[1]);
-            if (!in_array($nsAuth, $authorities, true)) {
-                $fileErrors[] = sprintf(
-                    "  Namespace authority: expected one of [%s], got '%s' (in '%s')",
-                    implode(', ', $authorities),
-                    $nsAuth,
-                    $fullNamespace
-                );
+        // If full protocol (6+ parts: SPX\Authority\System\Product\[Subsystem]\Domain\Entity),
+        // validate all structure coordinates against the closed vocabulary.
+        if ($partCount >= 6) {
+            $systemsVocab    = isset($systems) ? $systems : [];
+            $productsVocab   = isset($products) ? $products : [];
+            $subsystemsVocab = isset($subsystems) ? $subsystems : [];
+
+            if (!empty($authorities)) {
+                $nsAuth = strtolower($nsParts[1]);
+                if (!in_array($nsAuth, $authorities, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Namespace authority: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $authorities),
+                        $nsAuth,
+                        $fullNamespace
+                    );
+                }
+            }
+
+            if (!empty($systemsVocab)) {
+                $nsSystem = strtolower($nsParts[2]);
+                if (!in_array($nsSystem, $systemsVocab, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Namespace system: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $systemsVocab),
+                        $nsSystem,
+                        $fullNamespace
+                    );
+                }
+            }
+
+            if (!empty($productsVocab)) {
+                $nsProduct = strtolower($nsParts[3]);
+                if (!in_array($nsProduct, $productsVocab, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Namespace product: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $productsVocab),
+                        $nsProduct,
+                        $fullNamespace
+                    );
+                }
+            }
+
+            if ($partCount >= 7 && !empty($subsystemsVocab)) {
+                $nsSubsystem = strtolower($nsParts[4]);
+                if (!in_array($nsSubsystem, $subsystemsVocab, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Namespace subsystem: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $subsystemsVocab),
+                        $nsSubsystem,
+                        $fullNamespace
+                    );
+                }
             }
         }
     }
