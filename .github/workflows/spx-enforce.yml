@@ -110,7 +110,7 @@ jobs:
           required_params = [
               param
               for param in positional_params
-              if param.default is inspect._empty
+              if param.default is inspect.Parameter.empty
           ]
 
           if len(required_params) == 0:
