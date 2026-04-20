@@ -223,6 +223,22 @@ foreach ($phpFiles as $file) {
             // Legacy
             $pathDomainPascal = $pathSegments[1];
             $pathEntityPascal = $pathSegments[2];
+
+            // PascalCase enforcement for legacy path segments
+            if ($pathDomainPascal !== spxToPascal($pathDomainPascal)) {
+                $fileErrors[] = sprintf(
+                    "  Path domain: must be PascalCase, got '%s' (expected '%s')",
+                    $pathDomainPascal,
+                    spxToPascal($pathDomainPascal)
+                );
+            }
+            if ($pathEntityPascal !== spxToPascal($pathEntityPascal)) {
+                $fileErrors[] = sprintf(
+                    "  Path entity: must be PascalCase, got '%s' (expected '%s')",
+                    $pathEntityPascal,
+                    spxToPascal($pathEntityPascal)
+                );
+            }
         } elseif ($segCount === 7) {
             // Full protocol: src/Auth/Sys/Prod/Domain/Entity/File
             $pathAuthPascal   = $pathSegments[1];
@@ -230,6 +246,24 @@ foreach ($phpFiles as $file) {
             $pathProdPascal   = $pathSegments[3];
             $pathDomainPascal = $pathSegments[4];
             $pathEntityPascal = $pathSegments[5];
+
+            // PascalCase enforcement for all path directory segments
+            foreach ([
+                'authority' => $pathAuthPascal,
+                'system'    => $pathSysPascal,
+                'product'   => $pathProdPascal,
+                'domain'    => $pathDomainPascal,
+                'entity'    => $pathEntityPascal,
+            ] as $coordName => $segment) {
+                if ($segment !== spxToPascal($segment)) {
+                    $fileErrors[] = sprintf(
+                        "  Path %s: must be PascalCase, got '%s' (expected '%s')",
+                        $coordName,
+                        $segment,
+                        spxToPascal($segment)
+                    );
+                }
+            }
 
             if (!empty($authorities) && !in_array(strtolower($pathAuthPascal), $authorities, true)) {
                 $fileErrors[] = sprintf(
@@ -260,6 +294,25 @@ foreach ($phpFiles as $file) {
             $pathSubPascal    = $pathSegments[4];
             $pathDomainPascal = $pathSegments[5];
             $pathEntityPascal = $pathSegments[6];
+
+            // PascalCase enforcement for all path directory segments
+            foreach ([
+                'authority' => $pathAuthPascal,
+                'system'    => $pathSysPascal,
+                'product'   => $pathProdPascal,
+                'subsystem' => $pathSubPascal,
+                'domain'    => $pathDomainPascal,
+                'entity'    => $pathEntityPascal,
+            ] as $coordName => $segment) {
+                if ($segment !== spxToPascal($segment)) {
+                    $fileErrors[] = sprintf(
+                        "  Path %s: must be PascalCase, got '%s' (expected '%s')",
+                        $coordName,
+                        $segment,
+                        spxToPascal($segment)
+                    );
+                }
+            }
 
             if (!empty($authorities) && !in_array(strtolower($pathAuthPascal), $authorities, true)) {
                 $fileErrors[] = sprintf(
@@ -354,6 +407,24 @@ foreach ($phpFiles as $file) {
         $nsDomain       = strtolower($nsDomainPascal);
         $nsEntity       = strtolower($nsEntityPascal);
 
+        // PascalCase enforcement: each namespace segment must be exactly ucfirst(strtolower(segment))
+        if ($nsDomainPascal !== spxToPascal($nsDomainPascal)) {
+            $fileErrors[] = sprintf(
+                "  Namespace domain: must be PascalCase, got '%s' (expected '%s') in '%s'",
+                $nsDomainPascal,
+                spxToPascal($nsDomainPascal),
+                $fullNamespace
+            );
+        }
+        if ($nsEntityPascal !== spxToPascal($nsEntityPascal)) {
+            $fileErrors[] = sprintf(
+                "  Namespace entity: must be PascalCase, got '%s' (expected '%s') in '%s'",
+                $nsEntityPascal,
+                spxToPascal($nsEntityPascal),
+                $fullNamespace
+            );
+        }
+
         if (!in_array($nsDomain, $domains, true)) {
             $fileErrors[] = sprintf(
                 "  Namespace domain: expected one of [%s], got '%s' (in '%s')",
@@ -378,6 +449,24 @@ foreach ($phpFiles as $file) {
             $systemsVocab    = isset($systems) ? $systems : [];
             $productsVocab   = isset($products) ? $products : [];
             $subsystemsVocab = isset($subsystems) ? $subsystems : [];
+
+            // PascalCase enforcement for structure path segments in the namespace
+            $structureSegments = ['authority' => 1, 'system' => 2, 'product' => 3];
+            if ($partCount >= 7) {
+                $structureSegments['subsystem'] = 4;
+            }
+            foreach ($structureSegments as $coordLabel => $idx) {
+                $seg = $nsParts[$idx] ?? null;
+                if ($seg !== null && $seg !== spxToPascal($seg)) {
+                    $fileErrors[] = sprintf(
+                        "  Namespace %s: must be PascalCase, got '%s' (expected '%s') in '%s'",
+                        $coordLabel,
+                        $seg,
+                        spxToPascal($seg),
+                        $fullNamespace
+                    );
+                }
+            }
 
             if (!empty($authorities)) {
                 $nsAuth = strtolower($nsParts[1]);
