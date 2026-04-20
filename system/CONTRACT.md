@@ -235,14 +235,18 @@ Composition is mandatory. Composition is not invention.
 
 **Function:**
 - lowercase snake_case
-- exact pattern: spx_{domain}_{entity}_{action}
+- exact pattern: spx_{group1}_{group2}
+- optional pattern: spx_{group1}_{group2}_{subsystem}
+- optional pattern: spx_{group1}_{group2}_{subsystem}_{execution}
 
 **Namespace/Class:**
 - PascalCase segments
 
 **Route:**
-- lowercase path
-- exact pattern: /{domain}/{entity}/{action}
+- lowercase structure-path
+- exact pattern: /{group1}/{group2}
+- optional pattern: /{group1}/{group2}/{subsystem}
+- optional pattern: /{group1}/{group2}/{subsystem}/{execution}
 
 ## 11. Casing
 
