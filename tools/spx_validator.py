@@ -11,8 +11,13 @@ import json
 import sys
 import os
 
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_VOCAB_DEFAULT = os.path.join(_REPO_ROOT, "system", "spx-vocab.json")
 
-def load_vocab(vocab_path="system/spx-vocab.json"):
+
+def load_vocab(vocab_path=None):
+    if vocab_path is None:
+        vocab_path = _VOCAB_DEFAULT
     if not os.path.exists(vocab_path):
         _fail(f"PROTOCOL ERROR: vocab file not found at '{vocab_path}'")
     with open(vocab_path, "r") as f:
@@ -773,7 +778,7 @@ if __name__ == "__main__":
     print("=== SPX Protocol Validator v2.2.0 — Test Suite ===\n")
     print("Two-Group Model: Structure Path + Function Signature\n")
 
-    vocab = load_vocab("system/spx-vocab.json")
+    vocab = load_vocab()
 
     tests = [
         {
