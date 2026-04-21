@@ -157,66 +157,63 @@ class Validator
         ?string $subsystem = null,
         ?string $execution = null
     ): array {
-        $d  = $domain;
-        $e  = $entity;
-        $a  = $action;
-        $dP = ucfirst($d);
-        $eP = ucfirst($e);
-        $aP = ucfirst($a);
+        $domainP = ucfirst($domain);
+        $entityP = ucfirst($entity);
+        $actionP = ucfirst($action);
 
         if ($authority !== null && $system !== null && $product !== null) {
             // Full Two-Group Model output.
-            $authP = ucfirst($authority);
-            $sysP  = ucfirst($system);
-            $prodP = ucfirst($product);
-            $subP  = $subsystem !== null ? ucfirst($subsystem) : null;
-            $execP = $execution  !== null ? ucfirst($execution)  : null;
+            $authorityP = ucfirst($authority);
+            $systemP    = ucfirst($system);
+            $productP   = ucfirst($product);
+            $subsystemP = $subsystem !== null ? ucfirst($subsystem) : null;
+            $executionP = $execution  !== null ? ucfirst($execution) : null;
 
             // Build structure-path segments.
-            $structRoute = $subP !== null
+            $structRoute = $subsystemP !== null
                 ? "/{$authority}/{$system}/{$product}/{$subsystem}"
                 : "/{$authority}/{$system}/{$product}";
-            $structNs    = $subP !== null
-                ? "SPX\\{$authP}\\{$sysP}\\{$prodP}\\{$subP}"
-                : "SPX\\{$authP}\\{$sysP}\\{$prodP}";
-            $structFile  = $subP !== null
-                ? "/src/{$authP}/{$sysP}/{$prodP}/{$subP}"
-                : "/src/{$authP}/{$sysP}/{$prodP}";
-            $structFunc  = $subP !== null
+            $structNs    = $subsystemP !== null
+                ? "SPX\\{$authorityP}\\{$systemP}\\{$productP}\\{$subsystemP}"
+                : "SPX\\{$authorityP}\\{$systemP}\\{$productP}";
+            $structFile  = $subsystemP !== null
+                ? "/src/{$authorityP}/{$systemP}/{$productP}/{$subsystemP}"
+                : "/src/{$authorityP}/{$systemP}/{$productP}";
+            $structFunc  = $subsystemP !== null
                 ? "spx_{$authority}_{$system}_{$product}_{$subsystem}"
                 : "spx_{$authority}_{$system}_{$product}";
 
             // Optional execution suffix.
-            $actionClass = $execP !== null ? "{$aP}{$execP}" : $aP;
-            $actionFunc  = $execution !== null ? "{$a}_{$execution}" : $a;
+            $actionClass = $executionP !== null ? "{$actionP}{$executionP}" : $actionP;
+            $actionFunc  = $execution  !== null ? "{$action}_{$execution}"  : $action;
 
             return [
-                'domain'     => $d,
-                'entity'     => $e,
-                'action'     => $a,
+                'domain'     => $domain,
+                'entity'     => $entity,
+                'action'     => $action,
                 'authority'  => $authority,
                 'system'     => $system,
                 'product'    => $product,
                 'subsystem'  => $subsystem,
                 'execution'  => $execution,
-                'function'   => "{$structFunc}_{$d}_{$e}_{$actionFunc}",
-                'class'      => "{$structNs}\\{$dP}\\{$eP}\\{$actionClass}Service",
-                'route'      => "{$structRoute}/{$d}/{$e}/{$a}",
-                'namespace'  => "{$structNs}\\{$dP}\\{$eP}",
-                'file'       => "{$structFile}/{$dP}/{$eP}/{$actionClass}Service.php",
+                'function'   => "{$structFunc}_{$domain}_{$entity}_{$actionFunc}",
+                'class'      => "{$structNs}\\{$domainP}\\{$entityP}\\{$actionClass}Service",
+                'route'      => "{$structRoute}/{$domain}/{$entity}/{$action}",
+                'namespace'  => "{$structNs}\\{$domainP}\\{$entityP}",
+                'file'       => "{$structFile}/{$domainP}/{$entityP}/{$actionClass}Service.php",
             ];
         }
 
         // Legacy 3-coordinate format (backward compatibility).
         return [
-            'domain'    => $d,
-            'entity'    => $e,
-            'action'    => $a,
-            'function'  => "spx_{$d}_{$e}_{$a}",
-            'class'     => "SPX\\{$dP}\\{$eP}\\{$aP}Service",
-            'route'     => "/{$d}/{$e}/{$a}",
-            'namespace' => "SPX\\{$dP}\\{$eP}",
-            'file'      => "/src/{$dP}/{$eP}/{$aP}Service.php",
+            'domain'    => $domain,
+            'entity'    => $entity,
+            'action'    => $action,
+            'function'  => "spx_{$domain}_{$entity}_{$action}",
+            'class'     => "SPX\\{$domainP}\\{$entityP}\\{$actionP}Service",
+            'route'     => "/{$domain}/{$entity}/{$action}",
+            'namespace' => "SPX\\{$domainP}\\{$entityP}",
+            'file'      => "/src/{$domainP}/{$entityP}/{$actionP}Service.php",
         ];
     }
 
