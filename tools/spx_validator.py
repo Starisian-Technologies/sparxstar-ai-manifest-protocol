@@ -527,7 +527,6 @@ def validate_working_tree(src_path=None):
                         f"  Filename '{filename}': execution '{fname_execution}' not in vocab"
                     )
 
-
         try:
             source = php_file.read_text(encoding="utf-8")
         except Exception as exc:
