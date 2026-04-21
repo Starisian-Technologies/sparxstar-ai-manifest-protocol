@@ -381,7 +381,14 @@ def validate_working_tree(src_path=None):
     checked    = 0
 
     def pascal_ok(seg):
-        """True when seg is already the expected PascalCase form of its own text."""
+        """
+        True when seg is already the expected PascalCase form of its own text.
+
+        SPX vocabulary tokens are single lowercase words (e.g. 'audio', 'artifact',
+        'brain').  PascalCase for those is simply ucfirst(strtolower) — identical
+        to the PHP validator's spxToPascal() helper.  Directory segments are always
+        single-word vocab tokens, so compound-word PascalCase never occurs here.
+        """
         if not seg:
             return True
         return seg == seg[0].upper() + seg[1:].lower()
@@ -559,30 +566,56 @@ def validate_working_tree(src_path=None):
 
         # ------------------------------------------------------------------ #
         # 4. Class-suffix validation                                           #
+        # The regex is built dynamically from allowed_class_suffixes so that  #
+        # adding a new allowed suffix to the vocab is automatically picked up. #
         # ------------------------------------------------------------------ #
-        class_match = re.search(
-            r'^\s*class\s+([A-Za-z]+Service)\b', source, re.MULTILINE
-        )
+        if allowed_suffixes:
+            suffix_alts  = "|".join(re.escape(s) for s in allowed_suffixes)
+            class_re     = re.compile(
+                r'^\s*class\s+([A-Za-z]+(?:' + suffix_alts + r'))\b',
+                re.MULTILINE,
+            )
+            class_match = class_re.search(source)
+        else:
+            class_match = None
+
         if class_match:
-            class_name   = class_match.group(1)
-            action_match = re.match(r'^([A-Z][a-z]+)Service$', class_name)
-            if not action_match:
+            class_name = class_match.group(1)
+
+            # Identify which allowed suffix the class uses
+            matched_suffix = next(
+                (s for s in allowed_suffixes if class_name.endswith(s)), None
+            )
+
+            # Check forbidden suffixes (independent of match outcome)
+            for suffix in forbidden_suffixes:
+                if class_name.endswith(suffix):
+                    file_errors.append(
+                        f"  Class: '{class_name}' uses forbidden suffix '{suffix}'"
+                    )
+                    break
+
+            if matched_suffix is None:
                 file_errors.append(
-                    f"  Class: '{class_name}' must be {{Action}}Service "
-                    "(PascalCase action + 'Service')"
+                    f"  Class: '{class_name}' does not end with an "
+                    f"allowed suffix {allowed_suffixes}"
                 )
             else:
-                class_action = action_match.group(1).lower()
-                for suffix in forbidden_suffixes:
-                    if class_name.endswith(suffix):
-                        file_errors.append(
-                            f"  Class: '{class_name}' uses forbidden suffix '{suffix}'"
-                        )
-                        break
-                if class_action not in actions:
+                # Action name is everything before the suffix
+                action_name  = class_name[: -len(matched_suffix)]
+                action_match = re.match(r'^([A-Z][a-z]+)$', action_name)
+                if not action_match:
                     file_errors.append(
-                        f"  Class action: '{class_action}' not in vocab actions"
+                        f"  Class: '{class_name}' must be "
+                        f"{{Action}}{matched_suffix} "
+                        f"(PascalCase action + '{matched_suffix}')"
                     )
+                else:
+                    class_action = action_name.lower()
+                    if class_action not in actions:
+                        file_errors.append(
+                            f"  Class action: '{class_action}' not in vocab actions"
+                        )
 
         # ------------------------------------------------------------------ #
         # 5. spx_ function name validation                                     #
