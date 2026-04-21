@@ -338,6 +338,359 @@ def print_result(composed):
     print(f"file:      {composed['file']}")
 
 
+def validate_working_tree(src_path=None):
+    """
+    Walk src/ and validate all PHP files against the SPX protocol.
+
+    Called by CI as the authoritative repository-scanning entry point.
+    Returns True on clean pass, False on any violation.
+    Skips src/Protocol/ (protocol-internal infrastructure; exempt from SPX naming).
+    Handles a missing src/ directory gracefully — returns True (nothing to check).
+
+    Parameters
+    ----------
+    src_path : str or None
+        Path to the source directory to scan.  Defaults to "src".
+    """
+    import re
+    import pathlib
+
+    src_root = pathlib.Path(src_path) if src_path is not None else pathlib.Path("src")
+
+    if not src_root.exists():
+        print("SPX: src/ not found; no PHP files to validate.")
+        return True
+
+    vocab = load_vocab()
+
+    domains    = _domain_keys(vocab)
+    entities   = _entity_keys(vocab)
+    actions    = _action_keys(vocab)
+    structure  = vocab.get("structure", {})
+    executions = set(vocab.get("executions", {}).keys())
+
+    authorities = set(structure.get("authorities", []))
+    systems     = set(structure.get("systems",     []))
+    products    = set(structure.get("products",    []))
+    subsystems  = set(structure.get("subsystems",  []))
+
+    allowed_suffixes  = vocab.get("allowed_class_suffixes",  ["Service"])
+    forbidden_suffixes = vocab.get("forbidden_class_suffixes", [])
+
+    violations = []
+    checked    = 0
+
+    def pascal_ok(seg):
+        """True when seg is already the expected PascalCase form of its own text."""
+        if not seg:
+            return True
+        return seg == seg[0].upper() + seg[1:].lower()
+
+    def pascal_expected(seg):
+        if not seg:
+            return seg
+        return seg[0].upper() + seg[1:].lower()
+
+    for php_file in sorted(src_root.rglob("*.php")):
+        # rel is relative to the repo root so its parts start with 'src'
+        # e.g. ('src', 'Artifact', 'Audio', 'TranscribeService.php')
+        rel   = php_file.relative_to(src_root.parent)
+        parts = rel.parts
+
+        # Skip Protocol-internal infrastructure
+        if len(parts) >= 2 and parts[1] == "Protocol":
+            continue
+
+        checked += 1
+        rel_str     = "/".join(parts)
+        file_errors = []
+
+        # ------------------------------------------------------------------ #
+        # 1. Path-segment validation                                           #
+        # Legacy:    src/{Domain}/{Entity}/File.php             (4 parts)      #
+        # Full:      src/{Auth}/{Sys}/{Prod}/{Domain}/{Entity}/File.php (7)    #
+        # Full+sub:  src/{Auth}/{Sys}/{Prod}/{Sub}/{Domain}/{Entity}/File.php (8) #
+        # ------------------------------------------------------------------ #
+        seg_count   = len(parts)
+        path_domain = None
+        path_entity = None
+
+        if seg_count == 4:
+            pd_pascal = parts[1]
+            pe_pascal = parts[2]
+            for seg, label in [(pd_pascal, "domain"), (pe_pascal, "entity")]:
+                if not pascal_ok(seg):
+                    file_errors.append(
+                        f"  Path {label}: must be PascalCase, "
+                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                    )
+            path_domain = pd_pascal.lower()
+            path_entity = pe_pascal.lower()
+
+        elif seg_count == 7:
+            pa_pascal, ps_pascal, pp_pascal = parts[1], parts[2], parts[3]
+            pd_pascal, pe_pascal            = parts[4], parts[5]
+            for seg, label in [
+                (pa_pascal, "authority"), (ps_pascal, "system"), (pp_pascal, "product"),
+                (pd_pascal, "domain"),    (pe_pascal, "entity"),
+            ]:
+                if not pascal_ok(seg):
+                    file_errors.append(
+                        f"  Path {label}: must be PascalCase, "
+                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                    )
+            if authorities and pa_pascal.lower() not in authorities:
+                file_errors.append(f"  Path authority: '{pa_pascal.lower()}' not in vocab")
+            if systems and ps_pascal.lower() not in systems:
+                file_errors.append(f"  Path system: '{ps_pascal.lower()}' not in vocab")
+            if products and pp_pascal.lower() not in products:
+                file_errors.append(f"  Path product: '{pp_pascal.lower()}' not in vocab")
+            path_domain = pd_pascal.lower()
+            path_entity = pe_pascal.lower()
+
+        elif seg_count == 8:
+            pa_pascal, ps_pascal, pp_pascal = parts[1], parts[2], parts[3]
+            psub_pascal                     = parts[4]
+            pd_pascal, pe_pascal            = parts[5], parts[6]
+            for seg, label in [
+                (pa_pascal,   "authority"), (ps_pascal,   "system"),
+                (pp_pascal,   "product"),   (psub_pascal, "subsystem"),
+                (pd_pascal,   "domain"),    (pe_pascal,   "entity"),
+            ]:
+                if not pascal_ok(seg):
+                    file_errors.append(
+                        f"  Path {label}: must be PascalCase, "
+                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                    )
+            if authorities and pa_pascal.lower() not in authorities:
+                file_errors.append(f"  Path authority: '{pa_pascal.lower()}' not in vocab")
+            if systems and ps_pascal.lower() not in systems:
+                file_errors.append(f"  Path system: '{ps_pascal.lower()}' not in vocab")
+            if products and pp_pascal.lower() not in products:
+                file_errors.append(f"  Path product: '{pp_pascal.lower()}' not in vocab")
+            if subsystems and psub_pascal.lower() not in subsystems:
+                file_errors.append(f"  Path subsystem: '{psub_pascal.lower()}' not in vocab")
+            path_domain = pd_pascal.lower()
+            path_entity = pe_pascal.lower()
+
+        else:
+            file_errors.append(
+                f"  File path: unexpected depth ({seg_count} segments); "
+                "expected 4 (legacy), 7 (full), or 8 (full+subsystem)"
+            )
+
+        if path_domain is not None:
+            if path_domain not in domains:
+                file_errors.append(f"  Path domain: '{path_domain}' not in vocab")
+            if path_entity not in entities:
+                file_errors.append(f"  Path entity: '{path_entity}' not in vocab")
+
+        # ------------------------------------------------------------------ #
+        # 2. Read source                                                        #
+        # ------------------------------------------------------------------ #
+        try:
+            source = php_file.read_text(encoding="utf-8")
+        except Exception as exc:
+            violations.append(f"CANNOT READ {rel_str}: {exc}")
+            continue
+
+        # ------------------------------------------------------------------ #
+        # 3. Namespace validation                                               #
+        # ------------------------------------------------------------------ #
+        ns_match = re.search(
+            r'^\s*namespace\s+(SPX(?:\\[A-Za-z]+){2,6})\s*;',
+            source, re.MULTILINE
+        )
+        if not ns_match:
+            file_errors.append(
+                "  Namespace: expected 'SPX\\...\\{Domain}\\{Entity}', "
+                "none found or wrong format"
+            )
+        else:
+            ns_parts   = ns_match.group(1).split("\\")
+            part_count = len(ns_parts)  # includes 'SPX'
+
+            ns_domain_pascal = ns_parts[part_count - 2]
+            ns_entity_pascal = ns_parts[part_count - 1]
+
+            for seg, label in [(ns_domain_pascal, "domain"), (ns_entity_pascal, "entity")]:
+                if not pascal_ok(seg):
+                    file_errors.append(
+                        f"  Namespace {label}: must be PascalCase, "
+                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                    )
+
+            if ns_domain_pascal.lower() not in domains:
+                file_errors.append(
+                    f"  Namespace domain: '{ns_domain_pascal.lower()}' not in vocab"
+                )
+            if ns_entity_pascal.lower() not in entities:
+                file_errors.append(
+                    f"  Namespace entity: '{ns_entity_pascal.lower()}' not in vocab"
+                )
+
+            # Full-protocol namespace (6+ parts): validate structure segments
+            if part_count >= 6:
+                for idx, (coord, allowed_set) in enumerate(
+                    [("authority", authorities), ("system", systems), ("product", products)],
+                    start=1,
+                ):
+                    seg = ns_parts[idx]
+                    if not pascal_ok(seg):
+                        file_errors.append(
+                            f"  Namespace {coord}: must be PascalCase, "
+                            f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                        )
+                    if allowed_set and seg.lower() not in allowed_set:
+                        file_errors.append(
+                            f"  Namespace {coord}: '{seg.lower()}' not in vocab"
+                        )
+                if part_count >= 7:
+                    seg = ns_parts[4]
+                    if not pascal_ok(seg):
+                        file_errors.append(
+                            f"  Namespace subsystem: must be PascalCase, "
+                            f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                        )
+                    if subsystems and seg.lower() not in subsystems:
+                        file_errors.append(
+                            f"  Namespace subsystem: '{seg.lower()}' not in vocab"
+                        )
+
+        # ------------------------------------------------------------------ #
+        # 4. Class-suffix validation                                           #
+        # ------------------------------------------------------------------ #
+        class_match = re.search(
+            r'^\s*class\s+([A-Za-z]+Service)\b', source, re.MULTILINE
+        )
+        if class_match:
+            class_name   = class_match.group(1)
+            action_match = re.match(r'^([A-Z][a-z]+)Service$', class_name)
+            if not action_match:
+                file_errors.append(
+                    f"  Class: '{class_name}' must be {{Action}}Service "
+                    "(PascalCase action + 'Service')"
+                )
+            else:
+                class_action = action_match.group(1).lower()
+                for suffix in forbidden_suffixes:
+                    if class_name.endswith(suffix):
+                        file_errors.append(
+                            f"  Class: '{class_name}' uses forbidden suffix '{suffix}'"
+                        )
+                        break
+                if class_action not in actions:
+                    file_errors.append(
+                        f"  Class action: '{class_action}' not in vocab actions"
+                    )
+
+        # ------------------------------------------------------------------ #
+        # 5. spx_ function name validation                                     #
+        # ------------------------------------------------------------------ #
+        for func_name in re.findall(
+            r'^\s*function\s+(spx_[a-z_]+)\s*\(', source, re.MULTILINE
+        ):
+            func_parts   = func_name.split("_")  # ['spx', ...]
+            part_count_f = len(func_parts)
+
+            if func_parts[0] != "spx" or part_count_f < 4:
+                file_errors.append(
+                    f"  Function '{func_name}': must start with 'spx_' "
+                    "and have domain/entity/action"
+                )
+                continue
+
+            fd = fe = fa = None
+
+            if part_count_f == 4:
+                # Legacy: spx_domain_entity_action
+                fd, fe, fa = func_parts[1], func_parts[2], func_parts[3]
+
+            elif part_count_f == 7:
+                # Full: spx_auth_sys_prod_domain_entity_action
+                fd, fe, fa = func_parts[4], func_parts[5], func_parts[6]
+                if authorities and func_parts[1] not in authorities:
+                    file_errors.append(
+                        f"  Function '{func_name}': authority '{func_parts[1]}' not in vocab"
+                    )
+                if systems and func_parts[2] not in systems:
+                    file_errors.append(
+                        f"  Function '{func_name}': system '{func_parts[2]}' not in vocab"
+                    )
+                if products and func_parts[3] not in products:
+                    file_errors.append(
+                        f"  Function '{func_name}': product '{func_parts[3]}' not in vocab"
+                    )
+
+            elif part_count_f == 8:
+                # Full+exec:  spx_auth_sys_prod_domain_entity_action_exec
+                # Full+sub:   spx_auth_sys_prod_sub_domain_entity_action
+                if func_parts[4] in domains:
+                    fd, fe, fa   = func_parts[4], func_parts[5], func_parts[6]
+                    exec_token   = func_parts[7]
+                    if exec_token not in executions:
+                        file_errors.append(
+                            f"  Function '{func_name}': "
+                            f"execution '{exec_token}' not in vocab"
+                        )
+                else:
+                    sub_token  = func_parts[4]
+                    fd, fe, fa = func_parts[5], func_parts[6], func_parts[7]
+                    if subsystems and sub_token not in subsystems:
+                        file_errors.append(
+                            f"  Function '{func_name}': "
+                            f"subsystem '{sub_token}' not in vocab"
+                        )
+                if authorities and func_parts[1] not in authorities:
+                    file_errors.append(
+                        f"  Function '{func_name}': authority '{func_parts[1]}' not in vocab"
+                    )
+                if systems and func_parts[2] not in systems:
+                    file_errors.append(
+                        f"  Function '{func_name}': system '{func_parts[2]}' not in vocab"
+                    )
+                if products and func_parts[3] not in products:
+                    file_errors.append(
+                        f"  Function '{func_name}': product '{func_parts[3]}' not in vocab"
+                    )
+
+            else:
+                file_errors.append(
+                    f"  Function '{func_name}': unexpected part count "
+                    f"({part_count_f}); expected 4, 7, or 8"
+                )
+                continue
+
+            if fd is not None:
+                if fd not in domains:
+                    file_errors.append(
+                        f"  Function '{func_name}': domain '{fd}' not in vocab"
+                    )
+                if fe not in entities:
+                    file_errors.append(
+                        f"  Function '{func_name}': entity '{fe}' not in vocab"
+                    )
+                if fa not in actions:
+                    file_errors.append(
+                        f"  Function '{func_name}': action '{fa}' not in vocab"
+                    )
+                if fd in domains and fe in entities and fa in actions:
+                    for err in validate_constraints(fd, fe, fa, vocab):
+                        file_errors.append(f"  Function '{func_name}': {err}")
+
+        if file_errors:
+            violations.append(f"VIOLATION: {rel_str}")
+            violations.extend(file_errors)
+
+    if violations:
+        for v in violations:
+            print(v, file=sys.stderr)
+        return False
+
+    print(f"SPX repository validation passed: {checked} file(s) checked, 0 violations.")
+    return True
+
+
 if __name__ == "__main__":
     print("=== SPX Protocol Validator v2.0 — Test Suite ===\n")
     print("Two-Group Model: Structure Path + Function Signature\n")
