@@ -277,20 +277,27 @@ Structure coordinates MUST appear in:
 - route (first three path segments)
 - file path (first three directory segments under `/src/`)
 
-**Valid function:**
+**Valid function (full protocol):**
 ```
 spx_brain_sparxstar_player_artifact_audio_transcribe
 ```
 
-**Valid namespace:**
+**Valid namespace (full protocol):**
 ```
 SPX\Brain\Sparxstar\Player\Artifact\Audio
 ```
 
-**Invalid (structure coordinates missing):**
+**Valid function (legacy 3-coordinate — backward compatibility):**
 ```
 spx_artifact_audio_transcribe
-SPX\Artifact\Audio\TranscribeService
+```
+
+Legacy 3-coordinate identifiers (`spx_{domain}_{entity}_{action}` and `SPX\{Domain}\{Entity}`) are accepted for backward compatibility. They are missing structure coordinates and MUST NOT be used for new definitions. Validators MUST accept them without error. New code MUST use the full Two-Group protocol form.
+
+**Invalid (structure coordinates missing — new code only):**
+```
+spx_artifact_audio_transcribe     ← accepted by validators (legacy); forbidden for new definitions
+SPX\Artifact\Audio\TranscribeService  ← accepted by validators (legacy); forbidden for new definitions
 ```
 
 ## 14. Filesystem

@@ -57,10 +57,6 @@ jobs:
           src_path = repo_root / "src"
           validator_path = repo_root / "tools" / "spx_validator.py"
 
-          if not src_path.exists():
-              print("CI FAILED: src/ not found; cannot perform repository validation.", file=sys.stderr)
-              sys.exit(1)
-
           if not validator_path.is_file():
               print("CI FAILED: tools/spx_validator.py not found.", file=sys.stderr)
               sys.exit(1)

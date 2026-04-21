@@ -519,29 +519,40 @@ foreach ($phpFiles as $file) {
     }
 
     // -----------------------------------------------------------------------
-    // Rule 2: Class name — {Action}Service
+    // Rule 2: Class name — {Action}[{Execution}]Service
+    // Also accepts final/abstract/readonly modifiers before 'class'.
     // -----------------------------------------------------------------------
 
-    if (!preg_match('/^\s*class\s+([A-Za-z]+Service)\b/m', $source, $classMatch)) {
-        $fileErrors[] = "  Class: expected '{Action}Service', none found";
+    if (!preg_match('/^\s*(?:(?:final|abstract|readonly)\s+)*class\s+([A-Za-z]+Service)\b/m', $source, $classMatch)) {
+        $fileErrors[] = "  Class: expected '{Action}[{Execution}]Service', none found";
         $classAction = null;
     } else {
         $className = $classMatch[1];
 
-        if (!preg_match('/^([A-Z][a-z]+)Service$/', $className, $classActionMatch)) {
+        // Allow {Action}Service or {Action}{Execution}Service
+        if (!preg_match('/^([A-Z][a-z]+)([A-Z][a-z]+)?Service$/', $className, $classActionMatch)) {
             $fileErrors[] = sprintf(
-                "  Class name: expected '{Action}Service' (PascalCase action + 'Service'), got '%s'",
+                "  Class name: expected '{Action}[{Execution}]Service' (PascalCase), got '%s'",
                 $className
             );
             $classAction = null;
         } else {
-            $classAction = strtolower($classActionMatch[1]);
+            $classAction    = strtolower($classActionMatch[1]);
+            $classExecution = isset($classActionMatch[2]) ? strtolower($classActionMatch[2]) : null;
 
             if (!in_array($classAction, $actions, true)) {
                 $fileErrors[] = sprintf(
                     "  Class action: expected one of [%s], got '%s' (in class '%s')",
                     implode(', ', $actions),
                     $classAction,
+                    $className
+                );
+            }
+            if ($classExecution !== null && !in_array($classExecution, $executions, true)) {
+                $fileErrors[] = sprintf(
+                    "  Class execution: expected one of [%s], got '%s' (in class '%s')",
+                    implode(', ', $executions),
+                    $classExecution,
                     $className
                 );
             }
@@ -607,6 +618,22 @@ foreach ($phpFiles as $file) {
                         $funcName
                     );
                 }
+                if (!empty($systems) && !in_array($funcParts[2], $systems, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Function system: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $systems),
+                        $funcParts[2],
+                        $funcName
+                    );
+                }
+                if (!empty($products) && !in_array($funcParts[3], $products, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Function product: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $products),
+                        $funcParts[3],
+                        $funcName
+                    );
+                }
             } elseif ($partCount === 8) {
                 // Full+sub or full+exec: spx_auth_sys_prod_{sub_or_domain}_entity_action_{exec_or_nothing}
                 // Domain is always in positions 4 or 5 — determine by vocab membership
@@ -614,20 +641,54 @@ foreach ($phpFiles as $file) {
                 $candidate5 = $funcParts[5];
                 if (in_array($candidate4, $domains, true)) {
                     // spx_auth_sys_prod_domain_entity_action_exec
-                    $funcDomain = $candidate4;
-                    $funcEntity = $candidate5;
-                    $funcAction = $funcParts[6];
+                    $funcDomain  = $candidate4;
+                    $funcEntity  = $candidate5;
+                    $funcAction  = $funcParts[6];
+                    $funcExec    = $funcParts[7];
+                    if (!empty($executions) && !in_array($funcExec, $executions, true)) {
+                        $fileErrors[] = sprintf(
+                            "  Function execution: expected one of [%s], got '%s' (in '%s')",
+                            implode(', ', $executions),
+                            $funcExec,
+                            $funcName
+                        );
+                    }
                 } else {
                     // spx_auth_sys_prod_sub_domain_entity_action
+                    $funcSub    = $candidate4;
                     $funcDomain = $candidate5;
                     $funcEntity = $funcParts[6];
                     $funcAction = $funcParts[7];
+                    if (!empty($subsystems) && !in_array($funcSub, $subsystems, true)) {
+                        $fileErrors[] = sprintf(
+                            "  Function subsystem: expected one of [%s], got '%s' (in '%s')",
+                            implode(', ', $subsystems),
+                            $funcSub,
+                            $funcName
+                        );
+                    }
                 }
                 if (!empty($authorities) && !in_array($funcParts[1], $authorities, true)) {
                     $fileErrors[] = sprintf(
                         "  Function authority: expected one of [%s], got '%s' (in '%s')",
                         implode(', ', $authorities),
                         $funcParts[1],
+                        $funcName
+                    );
+                }
+                if (!empty($systems) && !in_array($funcParts[2], $systems, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Function system: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $systems),
+                        $funcParts[2],
+                        $funcName
+                    );
+                }
+                if (!empty($products) && !in_array($funcParts[3], $products, true)) {
+                    $fileErrors[] = sprintf(
+                        "  Function product: expected one of [%s], got '%s' (in '%s')",
+                        implode(', ', $products),
+                        $funcParts[3],
                         $funcName
                     );
                 }

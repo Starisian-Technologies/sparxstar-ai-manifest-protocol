@@ -4,7 +4,7 @@ SPX Protocol Validator
 Authority: spx-vocab.json
 Contract:  CONTRACT.md
 Rule:      Same input + same vocab = SAME output. If not, protocol is incomplete.
-Version:   2.0.0 — Two-Group Model (Structure Path + Function Signature)
+Version:   2.2.0 — Two-Group Model (Structure Path + Function Signature)
 """
 
 import json
@@ -493,8 +493,41 @@ def validate_working_tree(src_path=None):
                 file_errors.append(f"  Path entity: '{path_entity}' not in vocab")
 
         # ------------------------------------------------------------------ #
-        # 2. Read source                                                        #
+        # 1a. Filename validation: {Action}[{Execution}]{Suffix}.php          #
+        # The stem of the filename encodes the action (and optional execution) #
+        # and must end with an allowed suffix.                                  #
         # ------------------------------------------------------------------ #
+        filename     = parts[-1]          # e.g. "TranscribeService.php"
+        file_stem    = filename[:-4] if filename.endswith(".php") else filename
+        fname_suffix = next((s for s in allowed_suffixes if file_stem.endswith(s)), None)
+
+        if fname_suffix is None:
+            file_errors.append(
+                f"  Filename '{filename}': stem must end with one of "
+                f"{allowed_suffixes}"
+            )
+        else:
+            stem_prefix = file_stem[: -len(fname_suffix)]  # e.g. "Transcribe" or "ReadStream"
+            # Allow {Action} or {Action}{Execution}: two consecutive PascalCase words
+            fa_fe_match = re.match(r'^([A-Z][a-z]+)([A-Z][a-z]+)?$', stem_prefix)
+            if not fa_fe_match:
+                file_errors.append(
+                    f"  Filename '{filename}': stem prefix '{stem_prefix}' "
+                    f"must be {{Action}} or {{Action}}{{Execution}} (PascalCase)"
+                )
+            else:
+                fname_action    = fa_fe_match.group(1).lower()
+                fname_execution = fa_fe_match.group(2).lower() if fa_fe_match.group(2) else None
+                if fname_action not in actions:
+                    file_errors.append(
+                        f"  Filename '{filename}': action '{fname_action}' not in vocab"
+                    )
+                if fname_execution is not None and fname_execution not in executions:
+                    file_errors.append(
+                        f"  Filename '{filename}': execution '{fname_execution}' not in vocab"
+                    )
+
+
         try:
             source = php_file.read_text(encoding="utf-8")
         except Exception as exc:
@@ -568,18 +601,26 @@ def validate_working_tree(src_path=None):
         # 4. Class-suffix validation                                           #
         # The regex is built dynamically from allowed_class_suffixes so that  #
         # adding a new allowed suffix to the vocab is automatically picked up. #
+        # Class name may be {Action}{Suffix} or {Action}{Execution}{Suffix}.   #
+        # Modifiers (final, abstract, readonly) are accepted before 'class'.   #
         # ------------------------------------------------------------------ #
         if allowed_suffixes:
             suffix_alts  = "|".join(re.escape(s) for s in allowed_suffixes)
             class_re     = re.compile(
-                r'^\s*class\s+([A-Za-z]+(?:' + suffix_alts + r'))\b',
+                r'^\s*(?:(?:final|abstract|readonly)\s+)*class\s+([A-Za-z]+(?:'
+                + suffix_alts + r'))\b',
                 re.MULTILINE,
             )
             class_match = class_re.search(source)
         else:
             class_match = None
 
-        if class_match:
+        if not class_match:
+            file_errors.append(
+                f"  Class: no class with an allowed suffix {allowed_suffixes} found; "
+                "every service file must declare a Service class"
+            )
+        else:
             class_name = class_match.group(1)
 
             # Identify which allowed suffix the class uses
@@ -601,20 +642,25 @@ def validate_working_tree(src_path=None):
                     f"allowed suffix {allowed_suffixes}"
                 )
             else:
-                # Action name is everything before the suffix
-                action_name  = class_name[: -len(matched_suffix)]
-                action_match = re.match(r'^([A-Z][a-z]+)$', action_name)
-                if not action_match:
+                # Prefix is everything before the suffix: {Action} or {Action}{Execution}
+                action_prefix = class_name[: -len(matched_suffix)]
+                # Two consecutive PascalCase words, or one
+                ae_match = re.match(r'^([A-Z][a-z]+)([A-Z][a-z]+)?$', action_prefix)
+                if not ae_match:
                     file_errors.append(
-                        f"  Class: '{class_name}' must be "
-                        f"{{Action}}{matched_suffix} "
-                        f"(PascalCase action + '{matched_suffix}')"
+                        f"  Class: '{class_name}' prefix '{action_prefix}' must be "
+                        f"{{Action}} or {{Action}}{{Execution}} (PascalCase)"
                     )
                 else:
-                    class_action = action_name.lower()
+                    class_action    = ae_match.group(1).lower()
+                    class_execution = ae_match.group(2).lower() if ae_match.group(2) else None
                     if class_action not in actions:
                         file_errors.append(
                             f"  Class action: '{class_action}' not in vocab actions"
+                        )
+                    if class_execution is not None and class_execution not in executions:
+                        file_errors.append(
+                            f"  Class execution: '{class_execution}' not in vocab executions"
                         )
 
         # ------------------------------------------------------------------ #
@@ -725,7 +771,7 @@ def validate_working_tree(src_path=None):
 
 
 if __name__ == "__main__":
-    print("=== SPX Protocol Validator v2.0 — Test Suite ===\n")
+    print("=== SPX Protocol Validator v2.2.0 — Test Suite ===\n")
     print("Two-Group Model: Structure Path + Function Signature\n")
 
     vocab = load_vocab("system/spx-vocab.json")
