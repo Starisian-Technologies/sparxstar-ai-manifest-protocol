@@ -5,12 +5,13 @@ declare(strict_types=1);
 namespace SPX\Protocol;
 
 /**
- * SPX Protocol Validator
- * Authority: spx-vocab.json
- * Contract:  CONTRACT.md
+ * SPX Protocol Validator — Two-Group Model
+ * Authority: system/spx-vocab.json
+ * Contract:  system/CONTRACT.md
  *
- * Rule: Same input + same vocab = SAME output.
- * If not, the protocol is incomplete.
+ * Rule:   Same input + same vocab = SAME output. If not, protocol is incomplete.
+ * Groups: Structure Path (authority, system, product, [subsystem])
+ *         + Function Signature (domain, entity, action, [execution])
  */
 class Validator
 {
@@ -100,10 +101,20 @@ class Validator
 
     /**
      * Resolve raw intent coordinates to canonical protocol coordinates.
+     * Accepts optional structure-path coordinates (authority, system, product, subsystem)
+     * and an optional execution coordinate for the full Two-Group Model.
      * Throws on any unmappable input.
      */
-    public function resolve(string $domainRaw, string $entityRaw, string $actionRaw): array
-    {
+    public function resolve(
+        string  $domainRaw,
+        string  $entityRaw,
+        string  $actionRaw,
+        ?string $authority  = null,
+        ?string $system     = null,
+        ?string $product    = null,
+        ?string $subsystem  = null,
+        ?string $execution  = null
+    ): array {
         $domain = $this->normalize($domainRaw, 'domain');
         $entity = $this->normalize($entityRaw, 'entity');
         $action = $this->normalize($actionRaw, 'action');
@@ -124,23 +135,79 @@ class Validator
             throw new ProtocolException("INTENT UNRESOLVABLE: " . implode('; ', $errors));
         }
 
-        return $this->compose($domain, $entity, $action);
+        return $this->compose($domain, $entity, $action, $authority, $system, $product, $subsystem, $execution);
     }
 
     /**
      * Compose deterministic outputs from resolved coordinates.
+     *
+     * When structure-path coordinates (authority, system, product) are supplied the full
+     * Two-Group Model is applied.  When they are omitted the legacy 3-coordinate format
+     * is returned for backward compatibility.
+     *
      * Composition is NOT invention.
      */
-    public function compose(string $domain, string $entity, string $action): array
-    {
-        $d = $domain;
-        $e = $entity;
-        $a = $action;
-
+    public function compose(
+        string  $domain,
+        string  $entity,
+        string  $action,
+        ?string $authority = null,
+        ?string $system    = null,
+        ?string $product   = null,
+        ?string $subsystem = null,
+        ?string $execution = null
+    ): array {
+        $d  = $domain;
+        $e  = $entity;
+        $a  = $action;
         $dP = ucfirst($d);
         $eP = ucfirst($e);
         $aP = ucfirst($a);
 
+        if ($authority !== null && $system !== null && $product !== null) {
+            // Full Two-Group Model output.
+            $authP = ucfirst($authority);
+            $sysP  = ucfirst($system);
+            $prodP = ucfirst($product);
+            $subP  = $subsystem !== null ? ucfirst($subsystem) : null;
+            $execP = $execution  !== null ? ucfirst($execution)  : null;
+
+            // Build structure-path segments.
+            $structRoute = $subP !== null
+                ? "/{$authority}/{$system}/{$product}/{$subsystem}"
+                : "/{$authority}/{$system}/{$product}";
+            $structNs    = $subP !== null
+                ? "SPX\\{$authP}\\{$sysP}\\{$prodP}\\{$subP}"
+                : "SPX\\{$authP}\\{$sysP}\\{$prodP}";
+            $structFile  = $subP !== null
+                ? "/src/{$authP}/{$sysP}/{$prodP}/{$subP}"
+                : "/src/{$authP}/{$sysP}/{$prodP}";
+            $structFunc  = $subP !== null
+                ? "spx_{$authority}_{$system}_{$product}_{$subsystem}"
+                : "spx_{$authority}_{$system}_{$product}";
+
+            // Optional execution suffix.
+            $actionClass = $execP !== null ? "{$aP}{$execP}" : $aP;
+            $actionFunc  = $execution !== null ? "{$a}_{$execution}" : $a;
+
+            return [
+                'domain'     => $d,
+                'entity'     => $e,
+                'action'     => $a,
+                'authority'  => $authority,
+                'system'     => $system,
+                'product'    => $product,
+                'subsystem'  => $subsystem,
+                'execution'  => $execution,
+                'function'   => "{$structFunc}_{$d}_{$e}_{$actionFunc}",
+                'class'      => "{$structNs}\\{$dP}\\{$eP}\\{$actionClass}Service",
+                'route'      => "{$structRoute}/{$d}/{$e}/{$a}",
+                'namespace'  => "{$structNs}\\{$dP}\\{$eP}",
+                'file'       => "{$structFile}/{$dP}/{$eP}/{$actionClass}Service.php",
+            ];
+        }
+
+        // Legacy 3-coordinate format (backward compatibility).
         return [
             'domain'    => $d,
             'entity'    => $e,
@@ -205,5 +272,3 @@ class Validator
         );
     }
 }
-
-class ProtocolException extends \RuntimeException {}
