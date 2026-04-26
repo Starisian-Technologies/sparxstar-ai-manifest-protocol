@@ -159,16 +159,18 @@ runs:
             result = scanner(src_path=path_value)
         else:
             result = scanner()
-        if result is False:
-            print(f"::error::{scanner_name} reported SPX protocol violations.", file=sys.stderr)
-            print("result=failed", file=open(os.environ["GITHUB_OUTPUT"], "a"))
-            sys.exit(1)
 
-        if isinstance(result, int) and not isinstance(result, bool) and result != 0:
-            print(f"::error::{scanner_name} exited with status {result}.", file=sys.stderr)
-            print("result=failed", file=open(os.environ["GITHUB_OUTPUT"], "a"))
-            sys.exit(1)
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as github_output:
+            if result is False:
+                print(f"::error::{scanner_name} reported SPX protocol violations.", file=sys.stderr)
+                print("result=failed", file=github_output)
+                sys.exit(1)
 
-        print(f"SPX validation passed via {scanner_name}.")
-        print("result=clean", file=open(os.environ["GITHUB_OUTPUT"], "a"))
+            if isinstance(result, int) and not isinstance(result, bool) and result != 0:
+                print(f"::error::{scanner_name} exited with status {result}.", file=sys.stderr)
+                print("result=failed", file=github_output)
+                sys.exit(1)
+
+            print(f"SPX validation passed via {scanner_name}.")
+            print("result=clean", file=github_output)
         PY
