@@ -321,9 +321,9 @@ SPX\{AuthorityPascal}\{SystemPascal}\{ProductPascal}\{DomainPascal}\{EntityPasca
 
 No extra namespace layers for environment or runtime context.
 
-Protocol-internal infrastructure classes (e.g. `SPX\Protocol\Validator`) are excluded from domain-enforcement scans.
+Protocol-internal infrastructure classes (e.g. `SPX\Protocol\Validator`) reside in `tools/Protocol/` and are excluded from domain-enforcement scans.
 
-**Protocol Namespace Exemption:** The `src/Protocol/` directory and `SPX\Protocol` namespace are exempt from SPX naming enforcement. `Protocol` is not a domain in `spx-vocab.json` and must never be treated as one. It is the protocol runtime itself — the enforcement mechanism — not a governed service artifact. Validators must skip files under `src/Protocol/` when checking for domain-entity compliance.
+**Protocol Tooling Location:** The `SPX\Protocol` runtime classes (`Validator`, `ProtocolException`) live in `tools/Protocol/`, mapped via `composer.json` PSR-4 as `SPX\Protocol\ => tools/Protocol/`. They are not governed service artifacts and do not belong under `src/`. The `src/` tree is governed space; the protocol governor does not govern itself from inside governed space. Validators do not scan `tools/` for SPX naming compliance.
 
 ## 16. Class Type (STRICT)
 

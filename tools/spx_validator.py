@@ -349,8 +349,8 @@ def validate_working_tree(src_path=None):
 
     Called by CI as the authoritative repository-scanning entry point.
     Returns True on clean pass, False on any violation.
-    Skips src/Protocol/ (protocol-internal infrastructure; exempt from SPX naming).
     Handles a missing src/ directory gracefully — returns True (nothing to check).
+    Skips src/Protocol/ as a safety guard (Protocol runtime classes live in tools/Protocol/).
 
     Parameters
     ----------
@@ -409,7 +409,7 @@ def validate_working_tree(src_path=None):
         rel   = php_file.relative_to(src_root.parent)
         parts = rel.parts
 
-        # Skip Protocol-internal infrastructure
+        # Safety guard: Protocol runtime classes live in tools/Protocol/, not src/.
         if len(parts) >= 2 and parts[1] == "Protocol":
             continue
 

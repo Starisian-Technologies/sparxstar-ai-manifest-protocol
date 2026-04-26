@@ -136,7 +136,7 @@ foreach ($phpFiles as $file) {
     $fileErrors   = [];
 
     // -----------------------------------------------------------------------
-    // Skip protocol-internal infrastructure (not a domain service)
+    // Safety guard: Protocol runtime classes live in tools/Protocol/, not src/.
     // -----------------------------------------------------------------------
 
     if (strpos($relativePath, 'src/Protocol/') === 0) {

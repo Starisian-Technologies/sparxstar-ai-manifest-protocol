@@ -1,6 +1,7 @@
 {
   "autoload": {
     "psr-4": {
+      "SPX\\Protocol\\": "tools/Protocol/",
       "SPX\\": "src/"
     }
   }
