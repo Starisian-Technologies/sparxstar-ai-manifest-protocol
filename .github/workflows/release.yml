@@ -53,7 +53,7 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const version = "${{ steps.version.outputs.VERSION }}";
-            const changelog = `${{ steps.changelog.outputs.CHANGELOG }}`;
+            const changelog = ${{ toJSON(steps.changelog.outputs.CHANGELOG) }};
             const body = [
               `## SPX Protocol ${version}`,
               "",

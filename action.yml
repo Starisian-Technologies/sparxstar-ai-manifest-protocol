@@ -105,6 +105,12 @@ runs:
         src_path       = pathlib.Path(os.environ["SRC_PATH"])
 
         spec = importlib.util.spec_from_file_location("spx_validator", validator_path)
+        if spec is None or spec.loader is None:
+            print(
+                f"::error file={validator_path}::Unable to load bundled SPX validator module.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
         module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(module)
 
@@ -120,13 +126,39 @@ runs:
             print("::error::spx_validator.py has no recognised scanning entry point.", file=sys.stderr)
             sys.exit(1)
 
-        sig    = inspect.signature(scanner)
-        params = [p for p in sig.parameters.values()
-                  if p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
-                  and p.default is inspect.Parameter.empty]
+        sig = inspect.signature(scanner)
+        scanner_params = list(sig.parameters.values())
+        path_value = str(src_path)
 
-        result = scanner(str(src_path)) if params else scanner()
+        named_path_param = next(
+            (
+                p.name for p in scanner_params
+                if p.name in ("src_path", "path")
+                and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            ),
+            None,
+        )
+        accepts_positional_path = any(
+            p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            for p in scanner_params
+        )
+        accepts_var_positional = any(
+            p.kind is inspect.Parameter.VAR_POSITIONAL
+            for p in scanner_params
+        )
+        accepts_var_keyword = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in scanner_params
+        )
 
+        if named_path_param is not None:
+            result = scanner(**{named_path_param: path_value})
+        elif accepts_positional_path or accepts_var_positional:
+            result = scanner(path_value)
+        elif accepts_var_keyword:
+            result = scanner(src_path=path_value)
+        else:
+            result = scanner()
         if result is False:
             print(f"::error::{scanner_name} reported SPX protocol violations.", file=sys.stderr)
             print("result=failed", file=open(os.environ["GITHUB_OUTPUT"], "a"))
