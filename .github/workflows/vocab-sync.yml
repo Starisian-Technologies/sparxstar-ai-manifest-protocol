@@ -40,8 +40,13 @@ jobs:
       - name: Extract commit metadata
         id: meta
         run: |
+          MESSAGE="$(git log -1 --pretty=format:'%s')"
           echo "SHA=${GITHUB_SHA::8}" >> "$GITHUB_OUTPUT"
-          echo "MESSAGE=$(git log -1 --pretty=format:'%s')" >> "$GITHUB_OUTPUT"
+          {
+            echo "MESSAGE<<EOF"
+            echo "$MESSAGE"
+            echo "EOF"
+          } >> "$GITHUB_OUTPUT"
 
       - name: Open vocab-sync PR in ${{ matrix.implementation }}
         uses: actions/github-script@v7
