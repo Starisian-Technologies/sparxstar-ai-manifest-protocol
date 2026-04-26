@@ -47,14 +47,16 @@ jobs:
         uses: actions/github-script@v7
         env:
           VOCAB_SYNC_TOKEN: ${{ secrets.VOCAB_SYNC_TOKEN }}
+          SOURCE_COMMIT_SHA: ${{ steps.meta.outputs.SHA }}
+          SOURCE_COMMIT_MESSAGE: ${{ steps.meta.outputs.MESSAGE }}
         with:
           github-token: ${{ secrets.VOCAB_SYNC_TOKEN }}
           script: |
             const fs = require("fs");
 
             const [owner, repo] = "${{ matrix.implementation }}".split("/");
-            const sourceCommitSha  = "${{ steps.meta.outputs.SHA }}";
-            const sourceCommitMsg  = "${{ steps.meta.outputs.MESSAGE }}";
+            const sourceCommitSha  = process.env.SOURCE_COMMIT_SHA;
+            const sourceCommitMsg  = process.env.SOURCE_COMMIT_MESSAGE;
             const vocabContent     = fs.readFileSync("system/spx-vocab.json", "utf8");
             const branchName       = `vocab-sync/protocol-${sourceCommitSha}`;
             const targetFile       = "system/spx-vocab.json";
