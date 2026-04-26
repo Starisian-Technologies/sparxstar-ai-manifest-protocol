@@ -1,0 +1,137 @@
+name: SPX Protocol Enforcement
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+
+jobs:
+  spx-validate:
+    name: SPX Protocol Validator
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Verify spx-vocab.json exists
+        run: |
+          if [ ! -f system/spx-vocab.json ]; then
+            echo "CI FAILED: spx-vocab.json not found. Protocol authority file is required."
+            exit 1
+          fi
+
+      - name: Validate spx-vocab.json is valid JSON
+        run: |
+          python3 -c "
+          import json, sys
+          try:
+              with open('system/spx-vocab.json') as f:
+                  vocab = json.load(f)
+              required = ['domains', 'entities', 'actions', 'synonyms', 'composition', 'allowed_class_suffixes', 'structure']
+              missing = [k for k in required if k not in vocab]
+              if missing:
+                  print(f'CI FAILED: spx-vocab.json missing required keys: {missing}', file=sys.stderr)
+                  sys.exit(1)
+              print('spx-vocab.json: valid')
+          except json.JSONDecodeError as e:
+              print(f'CI FAILED: spx-vocab.json is not valid JSON: {e}', file=sys.stderr)
+              sys.exit(1)
+          "
+
+      - name: Run SPX protocol validator against repository contents (authoritative)
+        run: |
+          python3 - <<'PY'
+          import importlib.util
+          import inspect
+          import pathlib
+          import sys
+
+          repo_root = pathlib.Path.cwd()
+          src_path = repo_root / "src"
+          validator_path = repo_root / "tools" / "spx_validator.py"
+
+          if not validator_path.is_file():
+              print("CI FAILED: tools/spx_validator.py not found.", file=sys.stderr)
+              sys.exit(1)
+
+          spec = importlib.util.spec_from_file_location("spx_validator", validator_path)
+          if spec is None or spec.loader is None:
+              print("CI FAILED: unable to load tools/spx_validator.py.", file=sys.stderr)
+              sys.exit(1)
+
+          module = importlib.util.module_from_spec(spec)
+          spec.loader.exec_module(module)
+
+          candidate_names = (
+              "validate_working_tree",
+              "validate_repo",
+              "scan_repo",
+              "scan_working_tree",
+              "scan_path",
+          )
+
+          scanner = None
+          scanner_name = None
+          for name in candidate_names:
+              func = getattr(module, name, None)
+              if callable(func):
+                  scanner = func
+                  scanner_name = name
+                  break
+
+          if scanner is None:
+              print(
+                  "CI FAILED: tools/spx_validator.py does not expose a repository-scanning entry point. "
+                  "Refusing to treat default self-test execution as authoritative enforcement.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          signature = inspect.signature(scanner)
+          positional_params = [
+              param
+              for param in signature.parameters.values()
+              if param.kind in (
+                  inspect.Parameter.POSITIONAL_ONLY,
+                  inspect.Parameter.POSITIONAL_OR_KEYWORD,
+              )
+          ]
+          required_params = [
+              param
+              for param in positional_params
+              if param.default is inspect.Parameter.empty
+          ]
+
+          if len(required_params) == 0:
+              result = scanner()
+          elif len(required_params) == 1:
+              param_name = required_params[0].name.lower()
+              target = src_path if "src" in param_name or "path" in param_name else repo_root
+              result = scanner(str(target))
+          else:
+              print(
+                  f"CI FAILED: unsupported signature for repository scanner '{scanner_name}': {signature}",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          if result is False:
+              print(f"CI FAILED: {scanner_name} reported repository validation failure.", file=sys.stderr)
+              sys.exit(1)
+
+          if isinstance(result, int) and not isinstance(result, bool) and result != 0:
+              print(
+                  f"CI FAILED: {scanner_name} exited with non-zero status {result}.",
+                  file=sys.stderr,
+              )
+              sys.exit(1)
+
+          print(f"SPX repository validation completed via {scanner_name}.")
+          PY
