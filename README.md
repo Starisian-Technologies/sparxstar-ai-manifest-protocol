@@ -1,6 +1,6 @@
-# spx-protocol
+# SPARXSTAR AI Manifest Protocol - sparxstar-ai-manifest-protocol
 
-A deterministic, closed-vocabulary execution protocol.
+A deterministic, closed-vocabulary execution protocol as machine readable manifest for Artificial Intelligence.
 
 ## Purpose
 
