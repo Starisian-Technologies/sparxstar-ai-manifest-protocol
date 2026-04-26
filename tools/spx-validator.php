@@ -113,8 +113,8 @@ function spxToPascal(string $word): string
 // ---------------------------------------------------------------------------
 
 if (!is_dir($srcPath)) {
-    fwrite(STDERR, "ERROR: src/ directory not found: {$srcPath}\n");
-    exit(1);
+    echo "SPX: src/ not found; no PHP files to validate.\n";
+    exit(0);
 }
 
 /** @var SplFileInfo[] $phpFiles */

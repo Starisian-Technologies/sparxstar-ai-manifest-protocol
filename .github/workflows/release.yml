@@ -1,0 +1,85 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "v[0-9]+.[0-9]+.[0-9]+-*"
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Generate changelog from git log
+        id: changelog
+        run: |
+          PREVIOUS_TAG=$(git tag --sort=-version:refname | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+' | sed -n '2p')
+          if [ -z "$PREVIOUS_TAG" ]; then
+            RANGE="HEAD"
+          else
+            RANGE="${PREVIOUS_TAG}..HEAD"
+          fi
+
+          CHANGELOG=$(git log "$RANGE" \
+            --pretty=format:"- %s (%h)" \
+            --no-merges \
+            | grep -v '^\s*$' \
+            || echo "- Initial release")
+
+          # Write multi-line output safely
+          {
+            echo "CHANGELOG<<CHANGELOG_DELIMITER"
+            echo "$CHANGELOG"
+            echo "CHANGELOG_DELIMITER"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Create GitHub Release
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const version = "${{ steps.version.outputs.VERSION }}";
+            const changelog = `${{ steps.changelog.outputs.CHANGELOG }}`;
+            const body = [
+              `## SPX Protocol ${version}`,
+              "",
+              "### What is this release?",
+              "",
+              "This is an authoritative release of the SPX (SparxStar Execution Protocol) vocabulary and contract.",
+              "Language implementations should pin to this tag to consume stable, reviewed protocol files.",
+              "",
+              "### Protocol Authority Files",
+              "",
+              "| File | URL |",
+              "|------|-----|",
+              `| \`system/spx-vocab.json\` | https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${version}/system/spx-vocab.json |`,
+              `| \`system/CONTRACT.md\` | https://raw.githubusercontent.com/${context.repo.owner}/${context.repo.repo}/${version}/system/CONTRACT.md |`,
+              "",
+              "### Changes",
+              "",
+              changelog,
+            ].join("\n");
+
+            await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: version,
+              name: `SPX Protocol ${version}`,
+              body,
+              draft: false,
+              prerelease: version.includes("-"),
+            });
