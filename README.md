@@ -128,6 +128,5 @@ When `system/spx-vocab.json` changes on `main`, the `vocab-sync.yml` workflow au
 
 ## License
 
-**UNLICENSED — All Rights Reserved.**
-Copyright © Max Barrett / Starisian Technologies.
-No use, reproduction, or distribution is permitted without explicit written consent.
+Licensed under the Apache License, Version 2.0.
+See the `LICENSE` file for the full license text.
