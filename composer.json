@@ -1,8 +1,42 @@
 {
+  "name": "starisian/sparxstar-ai-manifest-protocol",
+  "description": "SPX Protocol — deterministic closed-vocabulary execution protocol with two-group model. Structural drift is interpreted as an architectural signal. Patent Pending.",
+  "type": "library",
+  "version": "1.0.0",
+  "license": "UNLICENSED",
+  "authors": [
+    {
+      "name": "Starisian Technologies, Max Barrett",
+      "homepage": "https://starisian.com",
+      "role": "Owner, Inventor"
+    }
+  ],
+  "keywords": [
+    "spx",
+    "protocol",
+    "deterministic",
+    "vocabulary",
+    "governance",
+    "sparxstar",
+    "ai",
+    "manifest"
+  ],
+  "homepage": "https://github.com/Starisian-Technologies/sparxstar-ai-manifest-protocol",
+  "support": {
+    "email": "support@starisian.com",
+    "source": "https://github.com/Starisian-Technologies/sparxstar-ai-manifest-protocol",
+    "issues": "https://github.com/Starisian-Technologies/sparxstar-ai-manifest-protocol/issues"
+  },
+  "require": {
+    "php": ">=8.3"
+  },
   "autoload": {
     "psr-4": {
       "SPX\\Protocol\\": "tools/Protocol/",
       "SPX\\": "src/"
     }
+  },
+  "config": {
+    "optimize-autoloader": true
   }
 }
