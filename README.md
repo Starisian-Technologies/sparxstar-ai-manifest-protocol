@@ -88,7 +88,7 @@ https://raw.githubusercontent.com/Starisian-Technologies/sparxstar-ai-manifest-p
 | `tools/spx_validator.py`  | Python   | CI scanner — `validate_working_tree()` entry point |
 | `tools/spx-validator.php` | PHP      | PHP-specific namespace/path/class enforcement    |
 
-The Python validator is the authoritative CI entry point used by `spx-enforce.yml`. It reads `system/spx-vocab.json`, walks the source tree of the consuming repository, and exits non-zero on any violation.
+The Python validator is the authoritative CI entry point used by `spx-enforce.yml`. It reads `system/spx-vocab.json`, walks `src/` in the consuming repository, and validates `*.php` files against the SPX naming rules. It is currently **PHP-specific**; non-PHP implementations should supply their own language-specific validator and consume the canonical `spx-vocab.json` and `CONTRACT.md` from this repository.
 
 ---
 

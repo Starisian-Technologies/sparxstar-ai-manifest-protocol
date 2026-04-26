@@ -1,8 +1,10 @@
-name: SPX Protocol Enforce
+name: SPX Protocol Enforce (PHP)
 description: >
-  Validate a repository against the SPX closed-vocabulary execution protocol.
-  Reads spx-vocab.json, walks the configured source path, and fails on any
-  naming or structure violation.
+  Validate a PHP repository against the SPX closed-vocabulary execution protocol.
+  Reads spx-vocab.json, walks the configured source path for *.php files, and
+  fails on any naming or structure violation. Non-PHP repositories should supply
+  a language-specific validator that consumes spx-vocab.json and CONTRACT.md
+  from the protocol authority repository.
 
 author: Starisian Technologies
 
