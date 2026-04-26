@@ -57,13 +57,15 @@ All coordinates must resolve to terms listed in `system/spx-vocab.json`. Unliste
 
 ## Protocol Authority Files
 
-| File                    | Purpose                                                                 |
-|-------------------------|-------------------------------------------------------------------------|
-| `system/spx-vocab.json` | Machine-readable vocabulary — the single source of truth for all terms  |
-| `system/CONTRACT.md`    | Human-readable contract — binding rules for humans, AI, and CI systems  |
+| File                    | Purpose                                                                                  |
+|-------------------------|------------------------------------------------------------------------------------------|
+| `system/spx-vocab.json` | Machine-readable vocabulary — the single source of truth for all terms                   |
+| `system/CONTRACT.md`    | Human-readable protocol contract — normative naming rules for humans, AI, and CI systems |
 
 ### Consuming the Authority Files Directly
 
+This repository publishes the protocol specification only. Runtime classes, package metadata,
+and language-specific bindings belong in consuming implementation repositories, not here.
 Reference the canonical files by tag in any implementation repo:
 
 ```
