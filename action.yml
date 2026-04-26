@@ -46,20 +46,24 @@ runs:
 
     - name: Verify protocol authority files exist
       shell: bash
+      env:
+        VOCAB_PATH: ${{ inputs.vocab-path }}
       run: |
-        if [ ! -f "${{ inputs.vocab-path }}" ]; then
-          echo "::error file=${{ inputs.vocab-path }}::SPX vocab file not found at '${{ inputs.vocab-path }}'. " \
+        if [ ! -f "$VOCAB_PATH" ]; then
+          echo "::error file=$VOCAB_PATH::SPX vocab file not found at '$VOCAB_PATH'. " \
                "Add system/spx-vocab.json to your repository or set the vocab-path input."
           exit 1
         fi
 
     - name: Validate spx-vocab.json structure
       shell: bash
+      env:
+        VOCAB_PATH: ${{ inputs.vocab-path }}
       run: |
         python3 - <<'PY'
-        import json, sys
+        import json, os, sys
         try:
-            with open("${{ inputs.vocab-path }}") as f:
+            with open(os.environ["VOCAB_PATH"]) as f:
                 vocab = json.load(f)
             required = ["domains", "entities", "actions", "synonyms", "composition", "allowed_class_suffixes", "structure"]
             missing = [k for k in required if k not in vocab]
@@ -74,11 +78,12 @@ runs:
 
     - name: Download SPX validator from protocol authority
       shell: bash
+      env:
+        ACTION_DIR: ${{ github.action_path }}
       run: |
         # Use the bundled validator when this action is referenced directly from
         # the sparxstar-ai-manifest-protocol repo; otherwise fetch the latest
         # released copy.
-        ACTION_DIR="${{ github.action_path }}"
         if [ -f "${ACTION_DIR}/tools/spx_validator.py" ]; then
           cp "${ACTION_DIR}/tools/spx_validator.py" /tmp/spx_validator.py
         else
@@ -90,12 +95,14 @@ runs:
     - name: Run SPX validator
       id: validate
       shell: bash
+      env:
+        SRC_PATH: ${{ inputs.src-path }}
       run: |
         python3 - <<'PY'
         import importlib.util, inspect, pathlib, sys, os
 
         validator_path = pathlib.Path("/tmp/spx_validator.py")
-        src_path       = pathlib.Path("${{ inputs.src-path }}")
+        src_path       = pathlib.Path(os.environ["SRC_PATH"])
 
         spec = importlib.util.spec_from_file_location("spx_validator", validator_path)
         module = importlib.util.module_from_spec(spec)
