@@ -76,20 +76,19 @@ runs:
             sys.exit(1)
         PY
 
-    - name: Download SPX validator from protocol authority
+    - name: Prepare bundled SPX validator
       shell: bash
       env:
         ACTION_DIR: ${{ github.action_path }}
       run: |
-        # Use the bundled validator when this action is referenced directly from
-        # the sparxstar-ai-manifest-protocol repo; otherwise fetch the latest
-        # released copy.
+        # Always use the validator bundled with the action at the resolved ref.
+        # Do not fetch from a moving branch, as that breaks pinning and
+        # reproducibility for consumers using a tag or commit SHA.
         if [ -f "${ACTION_DIR}/tools/spx_validator.py" ]; then
           cp "${ACTION_DIR}/tools/spx_validator.py" /tmp/spx_validator.py
         else
-          curl -fsSL \
-            "https://raw.githubusercontent.com/Starisian-Technologies/sparxstar-ai-manifest-protocol/main/tools/spx_validator.py" \
-            -o /tmp/spx_validator.py
+          echo "::error file=${ACTION_DIR}/tools/spx_validator.py::Bundled SPX validator not found. Ensure tools/spx_validator.py is included in the action package for the referenced ref."
+          exit 1
         fi
 
     - name: Run SPX validator
