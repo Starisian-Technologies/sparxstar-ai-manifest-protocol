@@ -17,7 +17,7 @@ _VOCAB_DEFAULT = os.path.join(_REPO_ROOT, "system", "spx-vocab.json")
 
 def load_vocab(vocab_path=None):
     if vocab_path is None:
-        vocab_path = _VOCAB_DEFAULT
+        vocab_path = os.environ.get("SPX_VOCAB_PATH") or _VOCAB_DEFAULT
     if not os.path.exists(vocab_path):
         _fail(f"PROTOCOL ERROR: vocab file not found at '{vocab_path}'")
     with open(vocab_path, "r") as f:

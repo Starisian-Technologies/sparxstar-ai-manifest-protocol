@@ -96,6 +96,7 @@ runs:
       shell: bash
       env:
         SRC_PATH: ${{ inputs.src-path }}
+        SPX_VOCAB_PATH: ${{ inputs.vocab-path }}
       run: |
         python3 - <<'PY'
         import importlib.util, inspect, pathlib, sys, os
