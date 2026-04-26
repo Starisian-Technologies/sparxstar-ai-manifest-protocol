@@ -27,6 +27,16 @@ jobs:
       - name: Checkout protocol repo
         uses: actions/checkout@v4
 
+      - name: Verify VOCAB_SYNC_TOKEN is configured
+        shell: bash
+        env:
+          TOKEN_CHECK: ${{ secrets.VOCAB_SYNC_TOKEN }}
+        run: |
+          if [ -z "$TOKEN_CHECK" ]; then
+            echo "::error::VOCAB_SYNC_TOKEN secret is not set. Add a GitHub PAT with 'repo' scope on the target implementation repositories as a repository secret named VOCAB_SYNC_TOKEN."
+            exit 1
+          fi
+
       - name: Extract commit metadata
         id: meta
         run: |

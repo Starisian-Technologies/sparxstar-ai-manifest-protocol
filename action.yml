@@ -60,7 +60,7 @@ runs:
       env:
         VOCAB_PATH: ${{ inputs.vocab-path }}
       run: |
-        python3 - <<'PY'
+        python - <<'PY'
         import json, os, sys
         try:
             with open(os.environ["VOCAB_PATH"]) as f:
@@ -85,7 +85,7 @@ runs:
         # Do not fetch from a moving branch, as that breaks pinning and
         # reproducibility for consumers using a tag or commit SHA.
         if [ -f "${ACTION_DIR}/tools/spx_validator.py" ]; then
-          cp "${ACTION_DIR}/tools/spx_validator.py" /tmp/spx_validator.py
+          cp "${ACTION_DIR}/tools/spx_validator.py" "${RUNNER_TEMP}/spx_validator.py"
         else
           echo "::error file=${ACTION_DIR}/tools/spx_validator.py::Bundled SPX validator not found. Ensure tools/spx_validator.py is included in the action package for the referenced ref."
           exit 1
@@ -98,10 +98,10 @@ runs:
         SRC_PATH: ${{ inputs.src-path }}
         SPX_VOCAB_PATH: ${{ inputs.vocab-path }}
       run: |
-        python3 - <<'PY'
+        python - <<'PY'
         import importlib.util, inspect, pathlib, sys, os
 
-        validator_path = pathlib.Path("/tmp/spx_validator.py")
+        validator_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "spx_validator.py"
         src_path       = pathlib.Path(os.environ["SRC_PATH"])
 
         spec = importlib.util.spec_from_file_location("spx_validator", validator_path)
