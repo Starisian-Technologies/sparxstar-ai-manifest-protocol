@@ -22,13 +22,13 @@ class Validator
         $vocabPath = $vocabPath ?? dirname(__DIR__, 2) . '/system/spx-vocab.json';
 
         if (!file_exists($vocabPath)) {
-            throw new \RuntimeException("SPX PROTOCOL ERROR: vocab file not found at '{$vocabPath}'");
+            throw new ProtocolException("SPX PROTOCOL ERROR: vocab file not found at '{$vocabPath}'");
         }
 
         $decoded = json_decode((string) file_get_contents($vocabPath), true);
 
         if (json_last_error() !== JSON_ERROR_NONE) {
-            throw new \RuntimeException("SPX PROTOCOL ERROR: spx-vocab.json is not valid JSON");
+            throw new ProtocolException("SPX PROTOCOL ERROR: spx-vocab.json is not valid JSON");
         }
 
         $this->vocab = $decoded;

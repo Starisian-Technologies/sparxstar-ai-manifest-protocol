@@ -126,7 +126,7 @@ jobs:
               print(f"CI FAILED: {scanner_name} reported repository validation failure.", file=sys.stderr)
               sys.exit(1)
 
-          if isinstance(result, int) and result != 0:
+          if isinstance(result, int) and not isinstance(result, bool) and result != 0:
               print(
                   f"CI FAILED: {scanner_name} exited with non-zero status {result}.",
                   file=sys.stderr,
