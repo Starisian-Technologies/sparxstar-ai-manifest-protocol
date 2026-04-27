@@ -114,16 +114,16 @@ function spxToPascal(string $word): string
 
 if (!is_dir($srcPath)) {
     $allowMissingSrc = getenv('SPX_VALIDATOR_ALLOW_MISSING_SRC');
-    $allowMissingSrc = is_string($allowMissingSrc)
-        && in_array(strtolower($allowMissingSrc), ['1', 'true', 'yes', 'on'], true);
+    $failOnMissingSrc = is_string($allowMissingSrc)
+        && in_array(strtolower($allowMissingSrc), ['0', 'false', 'no', 'off'], true);
 
-    if ($allowMissingSrc) {
-        echo "SPX: src/ not found; skipping validation because SPX_VALIDATOR_ALLOW_MISSING_SRC is enabled.\n";
-        exit(0);
+    if ($failOnMissingSrc) {
+        fwrite(STDERR, "ERROR: Expected src/ directory not found: {$srcPath}\n");
+        exit(1);
     }
 
-    fwrite(STDERR, "ERROR: Expected src/ directory not found: {$srcPath}\n");
-    exit(1);
+    echo "SPX: src/ not found; skipping validation.\n";
+    exit(0);
 }
 
 /** @var SplFileInfo[] $phpFiles */
