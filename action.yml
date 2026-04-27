@@ -27,11 +27,6 @@ inputs:
     required: false
     default: src
 
-  python-version:
-    description: Python version used to run the validator.
-    required: false
-    default: "3.11"
-
 outputs:
   result:
     description: "clean or failed"
@@ -44,7 +39,7 @@ runs:
     - name: Set up Python
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ inputs.python-version }}
+        python-version: "3.11"
 
     - name: Verify protocol authority files exist
       shell: bash
