@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
 SPARXSTAR AI Manifest Protocol (SPX) Validator
-Authority: spx-vocab.json
-Contract:  CONTRACT.md
+Authority: system/spx-vocab.json
+Contract:  system/CONTRACT.md
 Rule:      Same input + same vocab = SAME output. If not, protocol is incomplete.
 Version:   2.2.0 — Two-Group Model (Structure Path + Function Signature)
 """
