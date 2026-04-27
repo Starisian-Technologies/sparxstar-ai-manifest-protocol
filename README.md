@@ -128,6 +128,6 @@ When `system/spx-vocab.json` changes on `main`, the `vocab-sync.yml` workflow au
 
 ## License
 
-UNLICENSED — All Rights Reserved. Copyright © 2026 Max Barrett / Starisian Technologies.
+Proprietary — All Rights Reserved. Copyright © 2026 Max Barrett / Starisian Technologies.
 **Patent Pending** (provisional filed April 10, 2026). No licence is granted.
-See the `LICENSE` file for the full terms.
+See the [`LICENSE.md`](LICENSE.md) file for the full terms.
