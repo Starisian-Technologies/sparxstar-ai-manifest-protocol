@@ -110,9 +110,11 @@ To add a new implementation, open an issue in this repository so it can be regis
 
 `.github/workflows/spx-enforce.yml` validates `system/spx-vocab.json` structure and runs `tools/spx_validator.py` on every push and pull request.
 
-Any consuming repository can enforce SPX in one line using the reusable GitHub Action published from this repository:
+Any consuming repository can enforce SPARXSTAR AI Manifest Protocol (SPX) naming rules using the reusable GitHub Action published from this repository. Add both steps to your workflow:
 
 ```yaml
+- uses: actions/checkout@v4
+
 - uses: Starisian-Technologies/sparxstar-ai-manifest-protocol@v1.0.0
   with:
     vocab-path: system/spx-vocab.json
