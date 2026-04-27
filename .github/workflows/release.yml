@@ -37,9 +37,11 @@ jobs:
           CHANGELOG=$(git log "$RANGE" \
             --pretty=format:"- %s (%h)" \
             --no-merges \
-            | grep -v '^\s*$' \
-            || echo "- Initial release")
+            | grep -v '^\s*$')
 
+          if [ -z "$CHANGELOG" ]; then
+            CHANGELOG="- Initial release"
+          fi
           # Write multi-line output safely
           {
             echo "CHANGELOG<<CHANGELOG_DELIMITER"
