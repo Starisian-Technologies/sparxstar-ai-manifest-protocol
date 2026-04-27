@@ -1,0 +1,173 @@
+name: SPARXSTAR AI Manifest Protocol Enforce (PHP)
+description: >
+  Validate a PHP repository against the SPARXSTAR AI Manifest Protocol (SPX) closed-vocabulary naming protocol.
+  Reads spx-vocab.json, walks the configured source path for *.php files, and
+  fails on any naming or structure violation. Non-PHP repositories should supply
+  a language-specific validator that consumes spx-vocab.json and CONTRACT.md
+  from the protocol authority repository.
+
+author: Starisian Technologies
+
+branding:
+  icon: shield
+  color: blue
+
+inputs:
+  vocab-path:
+    description: >
+      Relative path to the SPX vocabulary file inside the calling repository.
+      Defaults to system/spx-vocab.json.
+    required: false
+    default: system/spx-vocab.json
+
+  src-path:
+    description: >
+      Relative path to the source directory to scan.
+      Defaults to src.
+    required: false
+    default: src
+
+outputs:
+  result:
+    description: "clean or failed"
+    value: ${{ steps.validate.outputs.result }}
+
+runs:
+  using: composite
+
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.11"
+
+    - name: Verify protocol authority files exist
+      shell: bash
+      env:
+        VOCAB_PATH: ${{ inputs.vocab-path }}
+      run: |
+        if [ ! -f "$VOCAB_PATH" ]; then
+          echo "::error file=$VOCAB_PATH::SPX vocab file not found at '$VOCAB_PATH'. " \
+               "Add system/spx-vocab.json to your repository or set the vocab-path input."
+          exit 1
+        fi
+
+    - name: Validate spx-vocab.json structure
+      shell: bash
+      env:
+        VOCAB_PATH: ${{ inputs.vocab-path }}
+      run: |
+        python - <<'PY'
+        import json, os, sys
+        try:
+            with open(os.environ["VOCAB_PATH"]) as f:
+                vocab = json.load(f)
+            required = ["domains", "entities", "actions", "synonyms", "composition", "allowed_class_suffixes", "structure"]
+            missing = [k for k in required if k not in vocab]
+            if missing:
+                print(f"::error::spx-vocab.json is missing required keys: {missing}", file=sys.stderr)
+                sys.exit(1)
+            print("spx-vocab.json: valid")
+        except json.JSONDecodeError as e:
+            print(f"::error::spx-vocab.json is not valid JSON: {e}", file=sys.stderr)
+            sys.exit(1)
+        PY
+
+    - name: Prepare bundled SPX validator
+      shell: bash
+      env:
+        ACTION_DIR: ${{ github.action_path }}
+      run: |
+        # Always use the validator bundled with the action at the resolved ref.
+        # Do not fetch from a moving branch, as that breaks pinning and
+        # reproducibility for consumers using a tag or commit SHA.
+        if [ -f "${ACTION_DIR}/tools/spx_validator.py" ]; then
+          cp "${ACTION_DIR}/tools/spx_validator.py" "${RUNNER_TEMP}/spx_validator.py"
+        else
+          echo "::error file=${ACTION_DIR}/tools/spx_validator.py::Bundled SPX validator not found. Ensure tools/spx_validator.py is included in the action package for the referenced ref."
+          exit 1
+        fi
+
+    - name: Run SPX validator
+      id: validate
+      shell: bash
+      env:
+        SRC_PATH: ${{ inputs.src-path }}
+        SPX_VOCAB_PATH: ${{ inputs.vocab-path }}
+      run: |
+        python - <<'PY'
+        import importlib.util, inspect, pathlib, sys, os
+
+        validator_path = pathlib.Path(os.environ["RUNNER_TEMP"]) / "spx_validator.py"
+        src_path       = pathlib.Path(os.environ["SRC_PATH"])
+
+        spec = importlib.util.spec_from_file_location("spx_validator", validator_path)
+        if spec is None or spec.loader is None:
+            print(
+                f"::error file={validator_path}::Unable to load bundled SPX validator module.",
+                file=sys.stderr,
+            )
+            sys.exit(1)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        scanner = None
+        for name in ("validate_working_tree", "validate_repo", "scan_repo", "scan_working_tree", "scan_path"):
+            fn = getattr(module, name, None)
+            if callable(fn):
+                scanner = fn
+                scanner_name = name
+                break
+
+        if scanner is None:
+            print("::error::spx_validator.py has no recognised scanning entry point.", file=sys.stderr)
+            sys.exit(1)
+
+        sig = inspect.signature(scanner)
+        scanner_params = list(sig.parameters.values())
+        path_value = str(src_path)
+
+        named_path_param = next(
+            (
+                p.name for p in scanner_params
+                if p.name in ("src_path", "path")
+                and p.kind in (inspect.Parameter.POSITIONAL_OR_KEYWORD, inspect.Parameter.KEYWORD_ONLY)
+            ),
+            None,
+        )
+        accepts_positional_path = any(
+            p.kind in (inspect.Parameter.POSITIONAL_ONLY, inspect.Parameter.POSITIONAL_OR_KEYWORD)
+            for p in scanner_params
+        )
+        accepts_var_positional = any(
+            p.kind is inspect.Parameter.VAR_POSITIONAL
+            for p in scanner_params
+        )
+        accepts_var_keyword = any(
+            p.kind is inspect.Parameter.VAR_KEYWORD
+            for p in scanner_params
+        )
+
+        if named_path_param is not None:
+            result = scanner(**{named_path_param: path_value})
+        elif accepts_positional_path or accepts_var_positional:
+            result = scanner(path_value)
+        elif accepts_var_keyword:
+            result = scanner(src_path=path_value)
+        else:
+            result = scanner()
+
+        with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as github_output:
+            if result is False:
+                print(f"::error::{scanner_name} reported SPX protocol violations.", file=sys.stderr)
+                print("result=failed", file=github_output)
+                sys.exit(1)
+
+            if isinstance(result, int) and not isinstance(result, bool) and result != 0:
+                print(f"::error::{scanner_name} exited with status {result}.", file=sys.stderr)
+                print("result=failed", file=github_output)
+                sys.exit(1)
+
+            print(f"SPX validation passed via {scanner_name}.")
+            print("result=clean", file=github_output)
+        PY

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """
-SPX Protocol Validator
-Authority: spx-vocab.json
-Contract:  CONTRACT.md
+SPARXSTAR AI Manifest Protocol (SPX) Validator
+Authority: system/spx-vocab.json
+Contract:  system/CONTRACT.md
 Rule:      Same input + same vocab = SAME output. If not, protocol is incomplete.
 Version:   2.2.0 — Two-Group Model (Structure Path + Function Signature)
 """
@@ -17,7 +17,7 @@ _VOCAB_DEFAULT = os.path.join(_REPO_ROOT, "system", "spx-vocab.json")
 
 def load_vocab(vocab_path=None):
     if vocab_path is None:
-        vocab_path = _VOCAB_DEFAULT
+        vocab_path = os.environ.get("SPX_VOCAB_PATH") or _VOCAB_DEFAULT
     if not os.path.exists(vocab_path):
         _fail(f"PROTOCOL ERROR: vocab file not found at '{vocab_path}'")
     with open(vocab_path, "r") as f:
@@ -775,7 +775,7 @@ def validate_working_tree(src_path=None):
 
 
 if __name__ == "__main__":
-    print("=== SPX Protocol Validator v2.2.0 — Test Suite ===\n")
+    print("=== SPARXSTAR AI Manifest Protocol (SPX) Validator v2.2.0 — Test Suite ===\n")
     print("Two-Group Model: Structure Path + Function Signature\n")
 
     vocab = load_vocab()

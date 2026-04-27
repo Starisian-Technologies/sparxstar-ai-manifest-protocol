@@ -1,4 +1,4 @@
-name: SPX Protocol Enforcement
+name: SPARXSTAR AI Manifest Protocol Enforcement
 
 on:
   push:
@@ -6,9 +6,12 @@ on:
   pull_request:
     branches: ["**"]
 
+permissions:
+  contents: read
+
 jobs:
   spx-validate:
-    name: SPX Protocol Validator
+    name: SPARXSTAR AI Manifest Protocol Validator
     runs-on: ubuntu-latest
 
     steps:
