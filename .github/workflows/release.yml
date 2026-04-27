@@ -55,11 +55,11 @@ jobs:
             const version = "${{ steps.version.outputs.VERSION }}";
             const changelog = ${{ toJSON(steps.changelog.outputs.CHANGELOG) }};
             const body = [
-              `## SPX Protocol ${version}`,
+              `## SPARXSTAR AI Manifest Protocol ${version}`,
               "",
               "### What is this release?",
               "",
-              "This is an authoritative release of the SPX (SparxStar Execution Protocol) vocabulary and contract.",
+              "This is an authoritative release of the SPARXSTAR AI Manifest Protocol (SPX) vocabulary and contract.",
               "Language implementations should pin to this tag to consume stable, reviewed protocol files.",
               "",
               "### Protocol Authority Files",
@@ -78,7 +78,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: version,
-              name: `SPX Protocol ${version}`,
+              name: `SPARXSTAR AI Manifest Protocol ${version}`,
               body,
               draft: false,
               prerelease: version.includes("-"),

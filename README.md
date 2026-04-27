@@ -1,4 +1,4 @@
-# SPX Protocol — sparxstar-ai-manifest-protocol
+# SPARXSTAR AI Manifest Protocol
 
 **Protocol Authority Repository** · Language-agnostic · Patent Pending
 
@@ -8,7 +8,7 @@
 
 AI code generators hallucinate API names. GPT-4o achieves only 38.58 % accuracy on low-frequency API calls, and API hallucinations account for up to 15 % of all LLM code errors. The root cause is structural: every programming language ships its own naming conventions, and AI agents generating code across repositories have no shared naming contract to anchor them.
 
-**SPX (SparxStar Execution Protocol)** is a deterministic, closed-vocabulary naming protocol. It defines a single, machine-readable vocabulary of permitted terms and a composition grammar that converts intent into an unambiguous identifier — the same way, every time, in any language. Structural drift is not a style violation; it is an architectural signal. Validators catch it at CI time so it never reaches production.
+**SPARXSTAR AI Manifest Protocol (SPX)** is a deterministic, closed-vocabulary naming protocol. It defines a single, machine-readable vocabulary of permitted terms and a composition grammar that converts intent into an unambiguous identifier — the same way, every time, in any language. Structural drift is not a style violation; it is an architectural signal. Validators catch it at CI time so it never reaches production.
 
 ---
 

@@ -1,6 +1,6 @@
-name: SPX Protocol Enforce (PHP)
+name: SPARXSTAR AI Manifest Protocol Enforce (PHP)
 description: >
-  Validate a PHP repository against the SPX closed-vocabulary execution protocol.
+  Validate a PHP repository against the SPARXSTAR AI Manifest Protocol (SPX) closed-vocabulary naming protocol.
   Reads spx-vocab.json, walks the configured source path for *.php files, and
   fails on any naming or structure violation. Non-PHP repositories should supply
   a language-specific validator that consumes spx-vocab.json and CONTRACT.md

@@ -11,7 +11,7 @@ Execute exactly as written.
 
 ---
 
-# SPX Protocol Contract
+# SPARXSTAR AI Manifest Protocol Contract
 
 Status: Authoritative human-readable contract
 Machine authority: spx-vocab.json + composition rules + CI validator

@@ -3,9 +3,9 @@
 declare(strict_types=1);
 
 /**
- * SPX Protocol Validator
+ * SPARXSTAR AI Manifest Protocol (SPX) Validator
  *
- * Reads system/spx-vocab.json and scans src/ for compliance with the SPX naming protocol.
+ * Reads system/spx-vocab.json and scans src/ for compliance with the SPARXSTAR AI Manifest Protocol (SPX) naming protocol.
  *
  * Exit codes:
  *   0 — all files pass

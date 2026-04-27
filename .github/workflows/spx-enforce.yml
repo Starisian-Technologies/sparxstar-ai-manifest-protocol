@@ -1,4 +1,4 @@
-name: SPX Protocol Enforcement
+name: SPARXSTAR AI Manifest Protocol Enforcement
 
 on:
   push:
@@ -8,7 +8,7 @@ on:
 
 jobs:
   spx-validate:
-    name: SPX Protocol Validator
+    name: SPARXSTAR AI Manifest Protocol Validator
     runs-on: ubuntu-latest
 
     steps:
