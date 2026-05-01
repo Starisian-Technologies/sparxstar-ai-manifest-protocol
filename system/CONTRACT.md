@@ -420,3 +420,50 @@ No silent drift is allowed.
 Same input + same vocab = SAME output.
 
 If not → protocol incomplete.
+
+## 22. Scope Declaration Rule
+
+Repositories consuming SPX must declare which artifacts are SPX-governed.
+
+A repository may declare its governance scope via a `spx.config.yml` file
+at the repo root. If present, the validator classifies each file by scope
+before applying any rules. Files outside declared SPX scopes are not
+subject to SPX service-layer naming rules.
+
+If no `spx.config.yml` is present, the validator applies the full
+SPX service-layer ruleset to all files under `src/` (legacy behavior).
+
+The governing principle is:
+
+> SPX validates declared SPX-governed artifacts, not entire repositories
+> by default.
+
+This rule supersedes any prior assumption that `src/` is unconditionally
+SPX-governed territory.
+
+## 23. Ruleset Rule
+
+The following rulesets are defined. Only these values are valid in
+`spx.config.yml`. No other values may be invented.
+
+| Ruleset         | What it checks                                              |
+|-----------------|-------------------------------------------------------------|
+| `spx-service`   | Full SPX service-layer rules — vocab, path depth, suffix,   |
+|                 | namespace, class name, function name.                       |
+| `psr-only`      | PSR-4 namespace declaration + type declaration only.        |
+|                 | No SPX vocab, suffix, or path-depth rules apply.            |
+| `infrastructure`| Alias for `psr-only`.                                       |
+| `ignore`        | File is skipped entirely. No checks applied.                |
+
+Repository kinds:
+
+| Kind               | Recommended default_ruleset |
+|--------------------|-----------------------------|
+| `service`          | `spx-service`               |
+| `infrastructure`   | `psr-only`                  |
+| `library`          | `psr-only`                  |
+| `mixed`            | `psr-only`                  |
+| `wordpress-plugin` | `psr-only`                  |
+| `generated`        | `ignore`                    |
+
+New rulesets and repository kinds require a protocol amendment per Rule 20.

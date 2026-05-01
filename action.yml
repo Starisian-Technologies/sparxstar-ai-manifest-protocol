@@ -27,6 +27,32 @@ inputs:
     required: false
     default: src
 
+  config-path:
+    description: >
+      Relative path to the repo-level SPX scope configuration file.
+      If present, the validator uses scope-aware classification instead of
+      scanning all of src/ as SPX service-layer code.
+      Defaults to spx.config.yml. Set to '' to disable config detection.
+    required: false
+    default: spx.config.yml
+
+  ruleset:
+    description: >
+      Override the default ruleset for unscoped files.
+      One of: spx-service | psr-only | infrastructure | ignore | auto.
+      'auto' reads the repository.default_ruleset from spx.config.yml.
+      Defaults to auto.
+    required: false
+    default: auto
+
+  strict-unscoped:
+    description: >
+      If true, files that do not match any declared scope are treated as
+      violations rather than falling back to the repository default_ruleset.
+      Defaults to false.
+    required: false
+    default: "false"
+
 outputs:
   result:
     description: "clean or failed"
@@ -94,6 +120,9 @@ runs:
       env:
         SRC_PATH: ${{ inputs.src-path }}
         SPX_VOCAB_PATH: ${{ inputs.vocab-path }}
+        SPX_CONFIG_PATH: ${{ inputs.config-path }}
+        SPX_RULESET: ${{ inputs.ruleset }}
+        SPX_STRICT_UNSCOPED: ${{ inputs.strict-unscoped }}
       run: |
         python - <<'PY'
         import importlib.util, inspect, pathlib, sys, os
