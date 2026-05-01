@@ -1,5 +1,5 @@
 {
-  "version": "2.2.0",
+  "version": "3.0.0",
   "structure": {
     "authorities": {
       "personal": { "description": "An individual user's private governed space. No shared access." },
@@ -207,6 +207,32 @@
     "ERR_NAMESPACE_COLLISION",
     "ERR_ILLEGAL_COMBINATION",
     "ERR_COORDINATE_RESERVED"
-  ]
+  ],
+  "repository_kinds": [
+    "service",
+    "infrastructure",
+    "library",
+    "mixed",
+    "wordpress-plugin",
+    "generated"
+  ],
+  "rulesets": {
+    "spx-service": {
+      "description": "Full SPX service-layer validation. Vocab, path depth, suffix, namespace, class, function.",
+      "applies_to": ["service"]
+    },
+    "psr-only": {
+      "description": "PSR-4 namespace and type declaration only. No SPX vocab rules.",
+      "applies_to": ["infrastructure", "library", "mixed", "wordpress-plugin"]
+    },
+    "infrastructure": {
+      "description": "Alias for psr-only.",
+      "applies_to": ["infrastructure"]
+    },
+    "ignore": {
+      "description": "File skipped entirely.",
+      "applies_to": ["generated"]
+    }
+  }
 }
 

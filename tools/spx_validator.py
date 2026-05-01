@@ -343,30 +343,315 @@ def print_result(composed):
     print(f"file:      {composed['file']}")
 
 
-def validate_working_tree(src_path=None):
+def _parse_yaml_minimal(text):
     """
-    Walk src/ and validate all PHP files against the SPX protocol.
+    Minimal YAML parser for spx.config.yml.
 
-    Called by CI as the authoritative repository-scanning entry point.
-    Returns True on clean pass, False on any violation.
-    Handles a missing src/ directory gracefully — returns True (nothing to check).
-    Skips src/Protocol/ as a safety guard (Protocol runtime classes live in tools/Protocol/).
+    Supports: comments, scalar values (str / int / bool / null),
+    inline empty or single-depth lists ([...]), block mappings
+    (key: value, indentation-based), and block sequences (- item).
 
-    Parameters
-    ----------
-    src_path : str or None
-        Path to the source directory to scan.  Defaults to "src".
+    Does not support: anchors, tags, flow mappings, multi-line scalars.
+    Raises ValueError with a descriptive message on unsupported syntax.
+    """
+    import re
+
+    # Pre-process: strip full-line comments, inline comments (only when # is
+    # preceded by whitespace, so # inside quoted strings is preserved), and
+    # drop blank lines.
+    lines = []
+    for raw in text.splitlines():
+        # Full-line comment — skip the whole line.
+        if re.match(r'^\s*#', raw):
+            continue
+        # Inline comment — strip only when # is preceded by at least one space/tab.
+        stripped = re.sub(r'\s+#.*$', '', raw)
+        if stripped.strip():
+            lines.append(stripped)
+
+    pos = [0]
+
+    def cur_line():
+        return lines[pos[0]] if pos[0] < len(lines) else None
+
+    def cur_indent():
+        line = cur_line()
+        return len(line) - len(line.lstrip()) if line else -1
+
+    def parse_scalar(s):
+        s = s.strip()
+        if s in ('true', 'yes', 'on'):
+            return True
+        if s in ('false', 'no', 'off'):
+            return False
+        if s in ('null', '~'):
+            return None
+        if s == '[]':
+            return []
+        # Inline list: ["item1", "item2"]
+        m_list = re.match(r'^\[(.*)\]$', s)
+        if m_list:
+            content = m_list.group(1).strip()
+            if not content:
+                return []
+            items = []
+            for item in re.split(r',\s*', content):
+                item = item.strip()
+                if len(item) >= 2 and item[0] in ('"', "'") and item[-1] == item[0]:
+                    items.append(item[1:-1])
+                else:
+                    items.append(item)
+            return items
+        try:
+            return int(s)
+        except ValueError:
+            pass
+        if len(s) >= 2 and s[0] in ('"', "'") and s[-1] == s[0]:
+            return s[1:-1]
+        return s
+
+    def parse_value(after_colon, key_indent):
+        after_colon = after_colon.strip()
+        if after_colon:
+            return parse_scalar(after_colon)
+        line = cur_line()
+        if line is None:
+            return None
+        ni = cur_indent()
+        if ni <= key_indent:
+            return None
+        ls = line.strip()
+        if ls.startswith('- ') or ls == '-':
+            return parse_sequence(ni)
+        return parse_mapping(ni)
+
+    def parse_mapping(min_indent):
+        result = {}
+        while True:
+            line = cur_line()
+            if line is None:
+                break
+            ind = cur_indent()
+            if ind < min_indent:
+                break
+            ls = line.strip()
+            if ls.startswith('- ') or ls == '-':
+                break
+            m = re.match(r'^\s*(\w[\w-]*)\s*:\s*(.*)', line)
+            if not m:
+                raise ValueError(f"Cannot parse mapping line: {line!r}")
+            key = m.group(1)
+            val_str = m.group(2)
+            pos[0] += 1
+            result[key] = parse_value(val_str, ind)
+        return result
+
+    def parse_sequence(min_indent):
+        result = []
+        while True:
+            line = cur_line()
+            if line is None:
+                break
+            ind = cur_indent()
+            if ind < min_indent:
+                break
+            ls = line.strip()
+            if not (ls.startswith('- ') or ls == '-'):
+                break
+            pos[0] += 1
+            item_content = ls[2:].strip() if ls.startswith('- ') else ''
+            item_base_indent = ind + 2
+            if not item_content:
+                nxt = cur_line()
+                if nxt and cur_indent() >= item_base_indent:
+                    nls = nxt.strip()
+                    if nls.startswith('- ') or nls == '-':
+                        result.append(parse_sequence(cur_indent()))
+                    else:
+                        result.append(parse_mapping(cur_indent()))
+                else:
+                    result.append(None)
+            else:
+                km = re.match(r'^(\w[\w-]*)\s*:\s*(.*)', item_content)
+                if km:
+                    item = {}
+                    first_key = km.group(1)
+                    item[first_key] = parse_value(km.group(2), item_base_indent - 1)
+                    while True:
+                        nxt = cur_line()
+                        if nxt is None:
+                            break
+                        ni = cur_indent()
+                        if ni < item_base_indent:
+                            break
+                        nls = nxt.strip()
+                        if nls.startswith('- ') or nls == '-':
+                            break
+                        nkm = re.match(r'^(\w[\w-]*)\s*:\s*(.*)', nls)
+                        if not nkm:
+                            raise ValueError(
+                                f"Cannot parse sequence item line: {nxt!r}"
+                            )
+                        pos[0] += 1
+                        item[nkm.group(1)] = parse_value(nkm.group(2), ni)
+                    result.append(item)
+                else:
+                    result.append(parse_scalar(item_content))
+        return result
+
+    return parse_mapping(0)
+
+
+def load_config(config_path="spx.config.yml"):
+    """
+    Load and return the repo-level SPX scope configuration.
+    Returns None if the config file does not exist (legacy mode).
+    Fails with a clear error if the file exists but cannot be parsed.
+    """
+    import pathlib
+    path = pathlib.Path(config_path)
+    path_display = str(path)
+
+    if not path.exists():
+        return None
+
+    if path.is_dir():
+        _fail(
+            f"Config path '{path_display}' exists but is a directory; expected a file"
+        )
+
+    try:
+        try:
+            import yaml
+            with open(path, encoding="utf-8") as f:
+                config = yaml.safe_load(f)
+        except ImportError:
+            # Fallback: minimal YAML parser for the SPX config schema.
+            with open(path, encoding="utf-8") as f:
+                config = _parse_yaml_minimal(f.read())
+    except OSError as exc:
+        _fail(f"Config file '{path_display}' could not be read: {exc}")
+        return None  # unreachable; satisfies static analysis
+    except Exception as exc:
+        _fail(f"Config file '{path_display}' exists but could not be parsed: {exc}")
+        return None  # unreachable; satisfies static analysis
+
+    if not isinstance(config, dict):
+        _fail(
+            f"Config file '{path_display}' parsed but is not a mapping — "
+            "check YAML structure"
+        )
+
+    return config
+
+
+def classify_file(rel_path, config):
+    """
+    Determine which scope and ruleset apply to a given file path.
+
+    Walks the scopes list in order. Returns the first matching scope dict.
+    If no scope matches, returns the repository default_ruleset.
+    If no config, returns 'spx-service' (legacy behavior).
+
+    rel_path: pathlib.Path relative to repo root (e.g. src/Contracts/Foo.php)
+    config:   parsed spx.config.yml dict, or None
+    """
+    import fnmatch
+    import pathlib
+
+    if config is None:
+        return {"name": "legacy", "ruleset": "spx-service"}
+
+    # config.get("spx", config) — if the top-level key "spx" is present, use
+    # its sub-dict; otherwise treat the whole config as the spx section (flat
+    # format). This allows both {spx: {repository: ...}} and {repository: ...}.
+    repo_section = config.get("spx", config).get("repository", {})
+    default_ruleset = repo_section.get("default_ruleset", "spx-service")
+    scopes = config.get("spx", config).get("scopes", [])
+
+    rel_str = str(rel_path).replace("\\", "/")
+
+    for scope in scopes:
+        patterns = scope.get("paths", [])
+        for pattern in patterns:
+            if fnmatch.fnmatch(rel_str, pattern):
+                return scope
+
+    return {"name": "default", "ruleset": default_ruleset}
+
+
+def validate_psr_file(php_file, rel_str):
+    """
+    PSR-4 infrastructure validation. Applied to files classified as
+    'psr-only' or 'infrastructure' scope.
+
+    Rules:
+    - File must be readable UTF-8.
+    - Must declare at least one namespace using standard PHP namespace syntax.
+    - Namespace must use backslash separators.
+    - Namespace must not begin with 'SPX\\' (that is the SPX service namespace).
+    - Must declare at least one class, interface, enum, or trait.
+    - No SPX service-layer rules apply (no suffix check, no vocab check,
+      no path-depth check, no action/entity/domain check).
+
+    Note: this validator checks only for the presence of a namespace
+    declaration and a class/interface/enum/trait declaration. It does not
+    enforce exactly one namespace declaration, `declare(strict_types=1);`,
+    or that the file contains only a single type declaration.
+
+    Returns list of error strings. Empty = clean.
+    """
+    import re
+
+    errors = []
+    try:
+        source = php_file.read_text(encoding="utf-8")
+    except Exception as exc:
+        return [f"  Cannot read file: {exc}"]
+
+    ns_match = re.search(r'^\s*namespace\s+([\w\\]+)\s*;', source, re.MULTILINE)
+    if not ns_match:
+        errors.append("  PSR: no namespace declaration found")
+    else:
+        ns = ns_match.group(1)
+        if ns.startswith("SPX\\"):
+            errors.append(
+                f"  PSR: namespace '{ns}' starts with 'SPX\\\\' — "
+                "infrastructure files must not use the SPX service namespace"
+            )
+        if "\\" not in ns:
+            errors.append(
+                f"  PSR: namespace '{ns}' has no backslash separator — "
+                "expected at least Vendor\\Package"
+            )
+
+    type_match = re.search(
+        r'^\s*(?:(?:final|abstract|readonly)\s+)*'
+        r'(?:class|interface|enum|trait)\s+\w+',
+        source, re.MULTILINE
+    )
+    if not type_match:
+        errors.append(
+            "  PSR: no class, interface, enum, or trait declaration found"
+        )
+
+    return errors
+
+
+def _validate_spx_service_file(php_file, rel, vocab):
+    """
+    Apply full SPX service-layer validation to a single PHP file.
+    Returns list of error strings. Empty = clean.
+
+    This is the extracted inner loop of validate_working_tree(). All existing
+    validation logic — path depth, filename, namespace, class suffix, spx_
+    function names — lives here unchanged. Do not alter the validation rules.
     """
     import re
     import pathlib
 
-    src_root = pathlib.Path(src_path) if src_path is not None else pathlib.Path("src")
-
-    if not src_root.exists():
-        print("SPX: src/ not found; no PHP files to validate.")
-        return True
-
-    vocab = load_vocab()
+    parts = rel.parts
+    file_errors = []
 
     domains    = _domain_keys(vocab)
     entities   = _entity_keys(vocab)
@@ -379,11 +664,8 @@ def validate_working_tree(src_path=None):
     products    = set(structure.get("products",    []))
     subsystems  = set(structure.get("subsystems",  []))
 
-    allowed_suffixes  = vocab.get("allowed_class_suffixes",  ["Service"])
+    allowed_suffixes   = vocab.get("allowed_class_suffixes",  ["Service"])
     forbidden_suffixes = vocab.get("forbidden_class_suffixes", [])
-
-    violations = []
-    checked    = 0
 
     def pascal_ok(seg):
         """
@@ -403,6 +685,456 @@ def validate_working_tree(src_path=None):
             return seg
         return seg[0].upper() + seg[1:].lower()
 
+    # ------------------------------------------------------------------ #
+    # 1. Path-segment validation                                           #
+    # Legacy:    src/{Domain}/{Entity}/File.php             (4 parts)      #
+    # Full:      src/{Auth}/{Sys}/{Prod}/{Domain}/{Entity}/File.php (7)    #
+    # Full+sub:  src/{Auth}/{Sys}/{Prod}/{Sub}/{Domain}/{Entity}/File.php (8) #
+    # ------------------------------------------------------------------ #
+    seg_count   = len(parts)
+    path_domain = None
+    path_entity = None
+
+    if seg_count == 4:
+        pd_pascal = parts[1]
+        pe_pascal = parts[2]
+        for seg, label in [(pd_pascal, "domain"), (pe_pascal, "entity")]:
+            if not pascal_ok(seg):
+                file_errors.append(
+                    f"  Path {label}: must be PascalCase, "
+                    f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                )
+        path_domain = pd_pascal.lower()
+        path_entity = pe_pascal.lower()
+
+    elif seg_count == 7:
+        pa_pascal, ps_pascal, pp_pascal = parts[1], parts[2], parts[3]
+        pd_pascal, pe_pascal            = parts[4], parts[5]
+        for seg, label in [
+            (pa_pascal, "authority"), (ps_pascal, "system"), (pp_pascal, "product"),
+            (pd_pascal, "domain"),    (pe_pascal, "entity"),
+        ]:
+            if not pascal_ok(seg):
+                file_errors.append(
+                    f"  Path {label}: must be PascalCase, "
+                    f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                )
+        if authorities and pa_pascal.lower() not in authorities:
+            file_errors.append(f"  Path authority: '{pa_pascal.lower()}' not in vocab")
+        if systems and ps_pascal.lower() not in systems:
+            file_errors.append(f"  Path system: '{ps_pascal.lower()}' not in vocab")
+        if products and pp_pascal.lower() not in products:
+            file_errors.append(f"  Path product: '{pp_pascal.lower()}' not in vocab")
+        path_domain = pd_pascal.lower()
+        path_entity = pe_pascal.lower()
+
+    elif seg_count == 8:
+        pa_pascal, ps_pascal, pp_pascal = parts[1], parts[2], parts[3]
+        psub_pascal                     = parts[4]
+        pd_pascal, pe_pascal            = parts[5], parts[6]
+        for seg, label in [
+            (pa_pascal,   "authority"), (ps_pascal,   "system"),
+            (pp_pascal,   "product"),   (psub_pascal, "subsystem"),
+            (pd_pascal,   "domain"),    (pe_pascal,   "entity"),
+        ]:
+            if not pascal_ok(seg):
+                file_errors.append(
+                    f"  Path {label}: must be PascalCase, "
+                    f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                )
+        if authorities and pa_pascal.lower() not in authorities:
+            file_errors.append(f"  Path authority: '{pa_pascal.lower()}' not in vocab")
+        if systems and ps_pascal.lower() not in systems:
+            file_errors.append(f"  Path system: '{ps_pascal.lower()}' not in vocab")
+        if products and pp_pascal.lower() not in products:
+            file_errors.append(f"  Path product: '{pp_pascal.lower()}' not in vocab")
+        if subsystems and psub_pascal.lower() not in subsystems:
+            file_errors.append(f"  Path subsystem: '{psub_pascal.lower()}' not in vocab")
+        path_domain = pd_pascal.lower()
+        path_entity = pe_pascal.lower()
+
+    else:
+        file_errors.append(
+            f"  File path: unexpected depth ({seg_count} segments); "
+            "expected 4 (legacy), 7 (full), or 8 (full+subsystem)"
+        )
+
+    if path_domain is not None:
+        if path_domain not in domains:
+            file_errors.append(f"  Path domain: '{path_domain}' not in vocab")
+        if path_entity not in entities:
+            file_errors.append(f"  Path entity: '{path_entity}' not in vocab")
+
+    # ------------------------------------------------------------------ #
+    # 1a. Filename validation: {Action}[{Execution}]{Suffix}.php          #
+    # The stem of the filename encodes the action (and optional execution) #
+    # and must end with an allowed suffix.                                  #
+    # ------------------------------------------------------------------ #
+    filename     = parts[-1]          # e.g. "TranscribeService.php"
+    file_stem    = filename[:-4] if filename.endswith(".php") else filename
+    fname_suffix = next((s for s in allowed_suffixes if file_stem.endswith(s)), None)
+
+    if fname_suffix is None:
+        file_errors.append(
+            f"  Filename '{filename}': stem must end with one of "
+            f"{allowed_suffixes}"
+        )
+    else:
+        stem_prefix = file_stem[: -len(fname_suffix)]  # e.g. "Transcribe" or "ReadStream"
+        # Allow {Action} or {Action}{Execution}: two consecutive PascalCase words
+        fa_fe_match = re.match(r'^([A-Z][a-z]+)([A-Z][a-z]+)?$', stem_prefix)
+        if not fa_fe_match:
+            file_errors.append(
+                f"  Filename '{filename}': stem prefix '{stem_prefix}' "
+                f"must be {{Action}} or {{Action}}{{Execution}} (PascalCase)"
+            )
+        else:
+            fname_action    = fa_fe_match.group(1).lower()
+            fname_execution = fa_fe_match.group(2).lower() if fa_fe_match.group(2) else None
+            if fname_action not in actions:
+                file_errors.append(
+                    f"  Filename '{filename}': action '{fname_action}' not in vocab"
+                )
+            if fname_execution is not None and fname_execution not in executions:
+                file_errors.append(
+                    f"  Filename '{filename}': execution '{fname_execution}' not in vocab"
+                )
+
+    try:
+        source = php_file.read_text(encoding="utf-8")
+    except Exception as exc:
+        return file_errors + [f"  Cannot read file: {exc}"]
+
+    # ------------------------------------------------------------------ #
+    # 3. Namespace validation                                               #
+    # ------------------------------------------------------------------ #
+    ns_match = re.search(
+        r'^\s*namespace\s+(SPX(?:\\[A-Za-z]+){2,6})\s*;',
+        source, re.MULTILINE
+    )
+    if not ns_match:
+        file_errors.append(
+            "  Namespace: expected 'SPX\\...\\{Domain}\\{Entity}', "
+            "none found or wrong format"
+        )
+    else:
+        ns_parts   = ns_match.group(1).split("\\")
+        part_count = len(ns_parts)  # includes 'SPX'
+
+        ns_domain_pascal = ns_parts[part_count - 2]
+        ns_entity_pascal = ns_parts[part_count - 1]
+
+        for seg, label in [(ns_domain_pascal, "domain"), (ns_entity_pascal, "entity")]:
+            if not pascal_ok(seg):
+                file_errors.append(
+                    f"  Namespace {label}: must be PascalCase, "
+                    f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                )
+
+        if ns_domain_pascal.lower() not in domains:
+            file_errors.append(
+                f"  Namespace domain: '{ns_domain_pascal.lower()}' not in vocab"
+            )
+        if ns_entity_pascal.lower() not in entities:
+            file_errors.append(
+                f"  Namespace entity: '{ns_entity_pascal.lower()}' not in vocab"
+            )
+
+        # Full-protocol namespace (6+ parts): validate structure segments
+        if part_count >= 6:
+            for idx, (coord, allowed_set) in enumerate(
+                [("authority", authorities), ("system", systems), ("product", products)],
+                start=1,
+            ):
+                seg = ns_parts[idx]
+                if not pascal_ok(seg):
+                    file_errors.append(
+                        f"  Namespace {coord}: must be PascalCase, "
+                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                    )
+                if allowed_set and seg.lower() not in allowed_set:
+                    file_errors.append(
+                        f"  Namespace {coord}: '{seg.lower()}' not in vocab"
+                    )
+            if part_count >= 7:
+                seg = ns_parts[4]
+                if not pascal_ok(seg):
+                    file_errors.append(
+                        f"  Namespace subsystem: must be PascalCase, "
+                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
+                    )
+                if subsystems and seg.lower() not in subsystems:
+                    file_errors.append(
+                        f"  Namespace subsystem: '{seg.lower()}' not in vocab"
+                    )
+
+    # ------------------------------------------------------------------ #
+    # 4. Class-suffix validation                                           #
+    # The regex is built dynamically from allowed_class_suffixes so that  #
+    # adding a new allowed suffix to the vocab is automatically picked up. #
+    # Class name may be {Action}{Suffix} or {Action}{Execution}{Suffix}.   #
+    # Modifiers (final, abstract, readonly) are accepted before 'class'.   #
+    # ------------------------------------------------------------------ #
+    if allowed_suffixes:
+        suffix_alts  = "|".join(re.escape(s) for s in allowed_suffixes)
+        class_re     = re.compile(
+            r'^\s*(?:(?:final|abstract|readonly)\s+)*class\s+([A-Za-z]+(?:'
+            + suffix_alts + r'))\b',
+            re.MULTILINE,
+        )
+        class_match = class_re.search(source)
+    else:
+        class_match = None
+
+    if not class_match:
+        file_errors.append(
+            f"  Class: no class with an allowed suffix {allowed_suffixes} found; "
+            "every service file must declare a Service class"
+        )
+    else:
+        class_name = class_match.group(1)
+
+        # Identify which allowed suffix the class uses
+        matched_suffix = next(
+            (s for s in allowed_suffixes if class_name.endswith(s)), None
+        )
+
+        # Check forbidden suffixes (independent of match outcome)
+        for suffix in forbidden_suffixes:
+            if class_name.endswith(suffix):
+                file_errors.append(
+                    f"  Class: '{class_name}' uses forbidden suffix '{suffix}'"
+                )
+                break
+
+        if matched_suffix is None:
+            file_errors.append(
+                f"  Class: '{class_name}' does not end with an "
+                f"allowed suffix {allowed_suffixes}"
+            )
+        else:
+            # Prefix is everything before the suffix: {Action} or {Action}{Execution}
+            action_prefix = class_name[: -len(matched_suffix)]
+            # Two consecutive PascalCase words, or one
+            ae_match = re.match(r'^([A-Z][a-z]+)([A-Z][a-z]+)?$', action_prefix)
+            if not ae_match:
+                file_errors.append(
+                    f"  Class: '{class_name}' prefix '{action_prefix}' must be "
+                    f"{{Action}} or {{Action}}{{Execution}} (PascalCase)"
+                )
+            else:
+                class_action    = ae_match.group(1).lower()
+                class_execution = ae_match.group(2).lower() if ae_match.group(2) else None
+                if class_action not in actions:
+                    file_errors.append(
+                        f"  Class action: '{class_action}' not in vocab actions"
+                    )
+                if class_execution is not None and class_execution not in executions:
+                    file_errors.append(
+                        f"  Class execution: '{class_execution}' not in vocab executions"
+                    )
+
+    # ------------------------------------------------------------------ #
+    # 5. spx_ function name validation                                     #
+    # ------------------------------------------------------------------ #
+    for func_name in re.findall(
+        r'^\s*function\s+(spx_[a-z_]+)\s*\(', source, re.MULTILINE
+    ):
+        func_parts   = func_name.split("_")  # ['spx', ...]
+        part_count_f = len(func_parts)
+
+        if func_parts[0] != "spx" or part_count_f < 4:
+            file_errors.append(
+                f"  Function '{func_name}': must start with 'spx_' "
+                "and have domain/entity/action"
+            )
+            continue
+
+        fd = fe = fa = None
+
+        if part_count_f == 4:
+            # Legacy: spx_domain_entity_action
+            fd, fe, fa = func_parts[1], func_parts[2], func_parts[3]
+
+        elif part_count_f == 7:
+            # Full: spx_auth_sys_prod_domain_entity_action
+            fd, fe, fa = func_parts[4], func_parts[5], func_parts[6]
+            if authorities and func_parts[1] not in authorities:
+                file_errors.append(
+                    f"  Function '{func_name}': authority '{func_parts[1]}' not in vocab"
+                )
+            if systems and func_parts[2] not in systems:
+                file_errors.append(
+                    f"  Function '{func_name}': system '{func_parts[2]}' not in vocab"
+                )
+            if products and func_parts[3] not in products:
+                file_errors.append(
+                    f"  Function '{func_name}': product '{func_parts[3]}' not in vocab"
+                )
+
+        elif part_count_f == 8:
+            # Full+exec:  spx_auth_sys_prod_domain_entity_action_exec
+            # Full+sub:   spx_auth_sys_prod_sub_domain_entity_action
+            if func_parts[4] in domains:
+                fd, fe, fa   = func_parts[4], func_parts[5], func_parts[6]
+                exec_token   = func_parts[7]
+                if exec_token not in executions:
+                    file_errors.append(
+                        f"  Function '{func_name}': "
+                        f"execution '{exec_token}' not in vocab"
+                    )
+            else:
+                sub_token  = func_parts[4]
+                fd, fe, fa = func_parts[5], func_parts[6], func_parts[7]
+                if subsystems and sub_token not in subsystems:
+                    file_errors.append(
+                        f"  Function '{func_name}': "
+                        f"subsystem '{sub_token}' not in vocab"
+                    )
+            if authorities and func_parts[1] not in authorities:
+                file_errors.append(
+                    f"  Function '{func_name}': authority '{func_parts[1]}' not in vocab"
+                )
+            if systems and func_parts[2] not in systems:
+                file_errors.append(
+                    f"  Function '{func_name}': system '{func_parts[2]}' not in vocab"
+                )
+            if products and func_parts[3] not in products:
+                file_errors.append(
+                    f"  Function '{func_name}': product '{func_parts[3]}' not in vocab"
+                )
+
+        else:
+            file_errors.append(
+                f"  Function '{func_name}': unexpected part count "
+                f"({part_count_f}); expected 4, 7, or 8"
+            )
+            continue
+
+        if fd is not None:
+            if fd not in domains:
+                file_errors.append(
+                    f"  Function '{func_name}': domain '{fd}' not in vocab"
+                )
+            if fe not in entities:
+                file_errors.append(
+                    f"  Function '{func_name}': entity '{fe}' not in vocab"
+                )
+            if fa not in actions:
+                file_errors.append(
+                    f"  Function '{func_name}': action '{fa}' not in vocab"
+                )
+            if fd in domains and fe in entities and fa in actions:
+                for err in validate_constraints(fd, fe, fa, vocab):
+                    file_errors.append(f"  Function '{func_name}': {err}")
+
+    return file_errors
+
+
+def validate_repository(config_path="spx.config.yml", src_path="src"):
+    """
+    Scope-aware repository validator. The core engine for v3.0.0+.
+
+    Loads spx.config.yml, classifies each PHP file by scope, applies the
+    declared ruleset, and reports violations per file.
+
+    Rulesets:
+      spx-service   — full SPX service-layer rules (current validate_working_tree logic)
+      psr-only      — PSR-4 namespace + type declaration only (validate_psr_file)
+      infrastructure — alias for psr-only
+      ignore        — skip entirely
+
+    Returns True on clean pass, False on any violation.
+    """
+    import pathlib
+
+    src_root = pathlib.Path(src_path)
+    if not src_root.exists():
+        print(f"SPX: '{src_path}' not found; no PHP files to validate.")
+        return True
+
+    config = load_config(config_path)
+    vocab = load_vocab()
+
+    violations = []
+    checked = 0
+
+    for php_file in sorted(src_root.rglob("*.php")):
+        rel = php_file.relative_to(src_root.parent)
+        rel_str = "/".join(rel.parts)
+
+        scope = classify_file(rel, config)
+        ruleset = scope.get("ruleset", "spx-service")
+
+        if ruleset == "ignore":
+            continue
+
+        checked += 1
+
+        if ruleset in ("psr-only", "infrastructure"):
+            file_errors = validate_psr_file(php_file, rel_str)
+            if file_errors:
+                violations.append(f"VIOLATION [{ruleset}]: {rel_str}")
+                violations.extend(file_errors)
+
+        elif ruleset == "spx-service":
+            file_errors = _validate_spx_service_file(php_file, rel, vocab)
+            if file_errors:
+                violations.append(f"VIOLATION [spx-service]: {rel_str}")
+                violations.extend(file_errors)
+
+        else:
+            violations.append(
+                f"UNKNOWN RULESET '{ruleset}' for {rel_str} — "
+                f"expected: spx-service | psr-only | infrastructure | ignore"
+            )
+
+    if violations:
+        for v in violations:
+            print(v, file=sys.stderr)
+        return False
+
+    print(
+        f"SPX repository validation passed: "
+        f"{checked} file(s) checked, 0 violations."
+    )
+    return True
+
+
+def validate_working_tree(src_path=None):
+    """
+    Repository scanner entry point. Called by CI.
+
+    v3.0.0+: If spx.config.yml exists at the repo root, delegates to
+    validate_repository() for scope-aware classification.
+
+    Legacy: If no config file exists, applies full SPX service-layer rules
+    to all PHP files under src/ (existing behavior, unchanged).
+    """
+    import re
+    import pathlib
+
+    # An explicitly empty SPX_CONFIG_PATH env var disables config detection.
+    config_path = os.environ.get("SPX_CONFIG_PATH") or "spx.config.yml"
+    resolved_src = src_path or "src"
+
+    # v3.0.0 scope-aware path.
+    # An explicitly empty SPX_CONFIG_PATH disables config detection.
+    if config_path and pathlib.Path(config_path).is_file():
+        return validate_repository(config_path, resolved_src)
+
+    # Legacy path — existing behavior, unchanged
+    src_root = pathlib.Path(resolved_src)
+
+    if not src_root.exists():
+        print("SPX: src/ not found; no PHP files to validate.")
+        return True
+
+    vocab = load_vocab()
+
+    violations = []
+    checked    = 0
+
     for php_file in sorted(src_root.rglob("*.php")):
         # rel is relative to the repo root so its parts start with 'src'
         # e.g. ('src', 'Artifact', 'Audio', 'TranscribeService.php')
@@ -415,352 +1147,8 @@ def validate_working_tree(src_path=None):
 
         checked += 1
         rel_str     = "/".join(parts)
-        file_errors = []
 
-        # ------------------------------------------------------------------ #
-        # 1. Path-segment validation                                           #
-        # Legacy:    src/{Domain}/{Entity}/File.php             (4 parts)      #
-        # Full:      src/{Auth}/{Sys}/{Prod}/{Domain}/{Entity}/File.php (7)    #
-        # Full+sub:  src/{Auth}/{Sys}/{Prod}/{Sub}/{Domain}/{Entity}/File.php (8) #
-        # ------------------------------------------------------------------ #
-        seg_count   = len(parts)
-        path_domain = None
-        path_entity = None
-
-        if seg_count == 4:
-            pd_pascal = parts[1]
-            pe_pascal = parts[2]
-            for seg, label in [(pd_pascal, "domain"), (pe_pascal, "entity")]:
-                if not pascal_ok(seg):
-                    file_errors.append(
-                        f"  Path {label}: must be PascalCase, "
-                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
-                    )
-            path_domain = pd_pascal.lower()
-            path_entity = pe_pascal.lower()
-
-        elif seg_count == 7:
-            pa_pascal, ps_pascal, pp_pascal = parts[1], parts[2], parts[3]
-            pd_pascal, pe_pascal            = parts[4], parts[5]
-            for seg, label in [
-                (pa_pascal, "authority"), (ps_pascal, "system"), (pp_pascal, "product"),
-                (pd_pascal, "domain"),    (pe_pascal, "entity"),
-            ]:
-                if not pascal_ok(seg):
-                    file_errors.append(
-                        f"  Path {label}: must be PascalCase, "
-                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
-                    )
-            if authorities and pa_pascal.lower() not in authorities:
-                file_errors.append(f"  Path authority: '{pa_pascal.lower()}' not in vocab")
-            if systems and ps_pascal.lower() not in systems:
-                file_errors.append(f"  Path system: '{ps_pascal.lower()}' not in vocab")
-            if products and pp_pascal.lower() not in products:
-                file_errors.append(f"  Path product: '{pp_pascal.lower()}' not in vocab")
-            path_domain = pd_pascal.lower()
-            path_entity = pe_pascal.lower()
-
-        elif seg_count == 8:
-            pa_pascal, ps_pascal, pp_pascal = parts[1], parts[2], parts[3]
-            psub_pascal                     = parts[4]
-            pd_pascal, pe_pascal            = parts[5], parts[6]
-            for seg, label in [
-                (pa_pascal,   "authority"), (ps_pascal,   "system"),
-                (pp_pascal,   "product"),   (psub_pascal, "subsystem"),
-                (pd_pascal,   "domain"),    (pe_pascal,   "entity"),
-            ]:
-                if not pascal_ok(seg):
-                    file_errors.append(
-                        f"  Path {label}: must be PascalCase, "
-                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
-                    )
-            if authorities and pa_pascal.lower() not in authorities:
-                file_errors.append(f"  Path authority: '{pa_pascal.lower()}' not in vocab")
-            if systems and ps_pascal.lower() not in systems:
-                file_errors.append(f"  Path system: '{ps_pascal.lower()}' not in vocab")
-            if products and pp_pascal.lower() not in products:
-                file_errors.append(f"  Path product: '{pp_pascal.lower()}' not in vocab")
-            if subsystems and psub_pascal.lower() not in subsystems:
-                file_errors.append(f"  Path subsystem: '{psub_pascal.lower()}' not in vocab")
-            path_domain = pd_pascal.lower()
-            path_entity = pe_pascal.lower()
-
-        else:
-            file_errors.append(
-                f"  File path: unexpected depth ({seg_count} segments); "
-                "expected 4 (legacy), 7 (full), or 8 (full+subsystem)"
-            )
-
-        if path_domain is not None:
-            if path_domain not in domains:
-                file_errors.append(f"  Path domain: '{path_domain}' not in vocab")
-            if path_entity not in entities:
-                file_errors.append(f"  Path entity: '{path_entity}' not in vocab")
-
-        # ------------------------------------------------------------------ #
-        # 1a. Filename validation: {Action}[{Execution}]{Suffix}.php          #
-        # The stem of the filename encodes the action (and optional execution) #
-        # and must end with an allowed suffix.                                  #
-        # ------------------------------------------------------------------ #
-        filename     = parts[-1]          # e.g. "TranscribeService.php"
-        file_stem    = filename[:-4] if filename.endswith(".php") else filename
-        fname_suffix = next((s for s in allowed_suffixes if file_stem.endswith(s)), None)
-
-        if fname_suffix is None:
-            file_errors.append(
-                f"  Filename '{filename}': stem must end with one of "
-                f"{allowed_suffixes}"
-            )
-        else:
-            stem_prefix = file_stem[: -len(fname_suffix)]  # e.g. "Transcribe" or "ReadStream"
-            # Allow {Action} or {Action}{Execution}: two consecutive PascalCase words
-            fa_fe_match = re.match(r'^([A-Z][a-z]+)([A-Z][a-z]+)?$', stem_prefix)
-            if not fa_fe_match:
-                file_errors.append(
-                    f"  Filename '{filename}': stem prefix '{stem_prefix}' "
-                    f"must be {{Action}} or {{Action}}{{Execution}} (PascalCase)"
-                )
-            else:
-                fname_action    = fa_fe_match.group(1).lower()
-                fname_execution = fa_fe_match.group(2).lower() if fa_fe_match.group(2) else None
-                if fname_action not in actions:
-                    file_errors.append(
-                        f"  Filename '{filename}': action '{fname_action}' not in vocab"
-                    )
-                if fname_execution is not None and fname_execution not in executions:
-                    file_errors.append(
-                        f"  Filename '{filename}': execution '{fname_execution}' not in vocab"
-                    )
-
-        try:
-            source = php_file.read_text(encoding="utf-8")
-        except Exception as exc:
-            violations.append(f"CANNOT READ {rel_str}: {exc}")
-            continue
-
-        # ------------------------------------------------------------------ #
-        # 3. Namespace validation                                               #
-        # ------------------------------------------------------------------ #
-        ns_match = re.search(
-            r'^\s*namespace\s+(SPX(?:\\[A-Za-z]+){2,6})\s*;',
-            source, re.MULTILINE
-        )
-        if not ns_match:
-            file_errors.append(
-                "  Namespace: expected 'SPX\\...\\{Domain}\\{Entity}', "
-                "none found or wrong format"
-            )
-        else:
-            ns_parts   = ns_match.group(1).split("\\")
-            part_count = len(ns_parts)  # includes 'SPX'
-
-            ns_domain_pascal = ns_parts[part_count - 2]
-            ns_entity_pascal = ns_parts[part_count - 1]
-
-            for seg, label in [(ns_domain_pascal, "domain"), (ns_entity_pascal, "entity")]:
-                if not pascal_ok(seg):
-                    file_errors.append(
-                        f"  Namespace {label}: must be PascalCase, "
-                        f"got '{seg}' (expected '{pascal_expected(seg)}')"
-                    )
-
-            if ns_domain_pascal.lower() not in domains:
-                file_errors.append(
-                    f"  Namespace domain: '{ns_domain_pascal.lower()}' not in vocab"
-                )
-            if ns_entity_pascal.lower() not in entities:
-                file_errors.append(
-                    f"  Namespace entity: '{ns_entity_pascal.lower()}' not in vocab"
-                )
-
-            # Full-protocol namespace (6+ parts): validate structure segments
-            if part_count >= 6:
-                for idx, (coord, allowed_set) in enumerate(
-                    [("authority", authorities), ("system", systems), ("product", products)],
-                    start=1,
-                ):
-                    seg = ns_parts[idx]
-                    if not pascal_ok(seg):
-                        file_errors.append(
-                            f"  Namespace {coord}: must be PascalCase, "
-                            f"got '{seg}' (expected '{pascal_expected(seg)}')"
-                        )
-                    if allowed_set and seg.lower() not in allowed_set:
-                        file_errors.append(
-                            f"  Namespace {coord}: '{seg.lower()}' not in vocab"
-                        )
-                if part_count >= 7:
-                    seg = ns_parts[4]
-                    if not pascal_ok(seg):
-                        file_errors.append(
-                            f"  Namespace subsystem: must be PascalCase, "
-                            f"got '{seg}' (expected '{pascal_expected(seg)}')"
-                        )
-                    if subsystems and seg.lower() not in subsystems:
-                        file_errors.append(
-                            f"  Namespace subsystem: '{seg.lower()}' not in vocab"
-                        )
-
-        # ------------------------------------------------------------------ #
-        # 4. Class-suffix validation                                           #
-        # The regex is built dynamically from allowed_class_suffixes so that  #
-        # adding a new allowed suffix to the vocab is automatically picked up. #
-        # Class name may be {Action}{Suffix} or {Action}{Execution}{Suffix}.   #
-        # Modifiers (final, abstract, readonly) are accepted before 'class'.   #
-        # ------------------------------------------------------------------ #
-        if allowed_suffixes:
-            suffix_alts  = "|".join(re.escape(s) for s in allowed_suffixes)
-            class_re     = re.compile(
-                r'^\s*(?:(?:final|abstract|readonly)\s+)*class\s+([A-Za-z]+(?:'
-                + suffix_alts + r'))\b',
-                re.MULTILINE,
-            )
-            class_match = class_re.search(source)
-        else:
-            class_match = None
-
-        if not class_match:
-            file_errors.append(
-                f"  Class: no class with an allowed suffix {allowed_suffixes} found; "
-                "every service file must declare a Service class"
-            )
-        else:
-            class_name = class_match.group(1)
-
-            # Identify which allowed suffix the class uses
-            matched_suffix = next(
-                (s for s in allowed_suffixes if class_name.endswith(s)), None
-            )
-
-            # Check forbidden suffixes (independent of match outcome)
-            for suffix in forbidden_suffixes:
-                if class_name.endswith(suffix):
-                    file_errors.append(
-                        f"  Class: '{class_name}' uses forbidden suffix '{suffix}'"
-                    )
-                    break
-
-            if matched_suffix is None:
-                file_errors.append(
-                    f"  Class: '{class_name}' does not end with an "
-                    f"allowed suffix {allowed_suffixes}"
-                )
-            else:
-                # Prefix is everything before the suffix: {Action} or {Action}{Execution}
-                action_prefix = class_name[: -len(matched_suffix)]
-                # Two consecutive PascalCase words, or one
-                ae_match = re.match(r'^([A-Z][a-z]+)([A-Z][a-z]+)?$', action_prefix)
-                if not ae_match:
-                    file_errors.append(
-                        f"  Class: '{class_name}' prefix '{action_prefix}' must be "
-                        f"{{Action}} or {{Action}}{{Execution}} (PascalCase)"
-                    )
-                else:
-                    class_action    = ae_match.group(1).lower()
-                    class_execution = ae_match.group(2).lower() if ae_match.group(2) else None
-                    if class_action not in actions:
-                        file_errors.append(
-                            f"  Class action: '{class_action}' not in vocab actions"
-                        )
-                    if class_execution is not None and class_execution not in executions:
-                        file_errors.append(
-                            f"  Class execution: '{class_execution}' not in vocab executions"
-                        )
-
-        # ------------------------------------------------------------------ #
-        # 5. spx_ function name validation                                     #
-        # ------------------------------------------------------------------ #
-        for func_name in re.findall(
-            r'^\s*function\s+(spx_[a-z_]+)\s*\(', source, re.MULTILINE
-        ):
-            func_parts   = func_name.split("_")  # ['spx', ...]
-            part_count_f = len(func_parts)
-
-            if func_parts[0] != "spx" or part_count_f < 4:
-                file_errors.append(
-                    f"  Function '{func_name}': must start with 'spx_' "
-                    "and have domain/entity/action"
-                )
-                continue
-
-            fd = fe = fa = None
-
-            if part_count_f == 4:
-                # Legacy: spx_domain_entity_action
-                fd, fe, fa = func_parts[1], func_parts[2], func_parts[3]
-
-            elif part_count_f == 7:
-                # Full: spx_auth_sys_prod_domain_entity_action
-                fd, fe, fa = func_parts[4], func_parts[5], func_parts[6]
-                if authorities and func_parts[1] not in authorities:
-                    file_errors.append(
-                        f"  Function '{func_name}': authority '{func_parts[1]}' not in vocab"
-                    )
-                if systems and func_parts[2] not in systems:
-                    file_errors.append(
-                        f"  Function '{func_name}': system '{func_parts[2]}' not in vocab"
-                    )
-                if products and func_parts[3] not in products:
-                    file_errors.append(
-                        f"  Function '{func_name}': product '{func_parts[3]}' not in vocab"
-                    )
-
-            elif part_count_f == 8:
-                # Full+exec:  spx_auth_sys_prod_domain_entity_action_exec
-                # Full+sub:   spx_auth_sys_prod_sub_domain_entity_action
-                if func_parts[4] in domains:
-                    fd, fe, fa   = func_parts[4], func_parts[5], func_parts[6]
-                    exec_token   = func_parts[7]
-                    if exec_token not in executions:
-                        file_errors.append(
-                            f"  Function '{func_name}': "
-                            f"execution '{exec_token}' not in vocab"
-                        )
-                else:
-                    sub_token  = func_parts[4]
-                    fd, fe, fa = func_parts[5], func_parts[6], func_parts[7]
-                    if subsystems and sub_token not in subsystems:
-                        file_errors.append(
-                            f"  Function '{func_name}': "
-                            f"subsystem '{sub_token}' not in vocab"
-                        )
-                if authorities and func_parts[1] not in authorities:
-                    file_errors.append(
-                        f"  Function '{func_name}': authority '{func_parts[1]}' not in vocab"
-                    )
-                if systems and func_parts[2] not in systems:
-                    file_errors.append(
-                        f"  Function '{func_name}': system '{func_parts[2]}' not in vocab"
-                    )
-                if products and func_parts[3] not in products:
-                    file_errors.append(
-                        f"  Function '{func_name}': product '{func_parts[3]}' not in vocab"
-                    )
-
-            else:
-                file_errors.append(
-                    f"  Function '{func_name}': unexpected part count "
-                    f"({part_count_f}); expected 4, 7, or 8"
-                )
-                continue
-
-            if fd is not None:
-                if fd not in domains:
-                    file_errors.append(
-                        f"  Function '{func_name}': domain '{fd}' not in vocab"
-                    )
-                if fe not in entities:
-                    file_errors.append(
-                        f"  Function '{func_name}': entity '{fe}' not in vocab"
-                    )
-                if fa not in actions:
-                    file_errors.append(
-                        f"  Function '{func_name}': action '{fa}' not in vocab"
-                    )
-                if fd in domains and fe in entities and fa in actions:
-                    for err in validate_constraints(fd, fe, fa, vocab):
-                        file_errors.append(f"  Function '{func_name}': {err}")
-
+        file_errors = _validate_spx_service_file(php_file, rel, vocab)
         if file_errors:
             violations.append(f"VIOLATION: {rel_str}")
             violations.extend(file_errors)

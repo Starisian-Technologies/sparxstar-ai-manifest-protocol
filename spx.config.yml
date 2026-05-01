@@ -1,0 +1,13 @@
+# SPARXSTAR AI Manifest Protocol — Self-Declaration
+# This file declares the SPX governance scope for this repository.
+# The protocol authority repo contains no PHP service artifacts.
+# tools/ is excluded from SPX scanning by the validator's built-in guard.
+
+spx:
+  version: 1
+
+  repository:
+    kind: infrastructure
+    default_ruleset: ignore
+
+  scopes: []

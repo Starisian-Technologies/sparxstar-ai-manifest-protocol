@@ -27,6 +27,15 @@ inputs:
     required: false
     default: src
 
+  config-path:
+    description: >
+      Relative path to the repo-level SPX scope configuration file.
+      If present, the validator uses scope-aware classification instead of
+      scanning all of src/ as SPX service-layer code.
+      Defaults to spx.config.yml.
+    required: false
+    default: spx.config.yml
+
 outputs:
   result:
     description: "clean or failed"
@@ -88,12 +97,17 @@ runs:
           exit 1
         fi
 
+    - name: Install PyYAML
+      shell: bash
+      run: pip install pyyaml --quiet
+
     - name: Run SPX validator
       id: validate
       shell: bash
       env:
         SRC_PATH: ${{ inputs.src-path }}
         SPX_VOCAB_PATH: ${{ inputs.vocab-path }}
+        SPX_CONFIG_PATH: ${{ inputs.config-path }}
       run: |
         python - <<'PY'
         import importlib.util, inspect, pathlib, sys, os
