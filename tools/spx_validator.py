@@ -388,6 +388,9 @@ def classify_file(rel_path, config):
     if config is None:
         return {"name": "legacy", "ruleset": "spx-service"}
 
+    # config.get("spx", config) — if the top-level key "spx" is present, use
+    # its sub-dict; otherwise treat the whole config as the spx section (flat
+    # format). This allows both {spx: {repository: ...}} and {repository: ...}.
     repo_section = config.get("spx", config).get("repository", {})
     default_ruleset = repo_section.get("default_ruleset", "spx-service")
     scopes = config.get("spx", config).get("scopes", [])
@@ -486,6 +489,14 @@ def _validate_spx_service_file(php_file, rel, vocab):
     forbidden_suffixes = vocab.get("forbidden_class_suffixes", [])
 
     def pascal_ok(seg):
+        """
+        True when seg is already the expected PascalCase form of its own text.
+
+        SPX vocabulary tokens are single lowercase words (e.g. 'audio', 'artifact',
+        'brain').  PascalCase for those is simply ucfirst(strtolower) — identical
+        to the PHP validator's spxToPascal() helper.  Directory segments are always
+        single-word vocab tokens, so compound-word PascalCase never occurs here.
+        """
         if not seg:
             return True
         return seg == seg[0].upper() + seg[1:].lower()
