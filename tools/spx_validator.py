@@ -360,7 +360,6 @@ def load_config(config_path="spx.config.yml"):
                 return yaml.safe_load(f)
         except ImportError:
             # Fallback: require JSON-compatible YAML (no anchors, no tags).
-            import json
             import re
             with open(path) as f:
                 raw = f.read()
