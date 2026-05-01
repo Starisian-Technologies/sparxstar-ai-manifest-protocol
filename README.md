@@ -69,8 +69,8 @@ and language-specific bindings belong in consuming implementation repositories, 
 Reference the canonical files by tag in any implementation repo:
 
 ```
-https://raw.githubusercontent.com/Starisian-Technologies/sparxstar-ai-manifest-protocol/v1.0.0/system/spx-vocab.json
-https://raw.githubusercontent.com/Starisian-Technologies/sparxstar-ai-manifest-protocol/v1.0.0/system/CONTRACT.md
+https://raw.githubusercontent.com/Starisian-Technologies/sparxstar-ai-manifest-protocol/v3.0.0/system/spx-vocab.json
+https://raw.githubusercontent.com/Starisian-Technologies/sparxstar-ai-manifest-protocol/v3.0.0/system/CONTRACT.md
 ```
 
 Or pin to `main` for always-latest (not recommended for production):
@@ -115,7 +115,7 @@ Any consuming repository can enforce SPARXSTAR AI Manifest Protocol (SPX) naming
 ```yaml
 - uses: actions/checkout@v4
 
-- uses: Starisian-Technologies/sparxstar-ai-manifest-protocol@v1.0.0
+- uses: Starisian-Technologies/sparxstar-ai-manifest-protocol@v3.0.0
   with:
     vocab-path: system/spx-vocab.json
 ```

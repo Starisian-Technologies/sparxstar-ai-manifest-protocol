@@ -4,7 +4,7 @@ SPARXSTAR AI Manifest Protocol (SPX) Validator
 Authority: system/spx-vocab.json
 Contract:  system/CONTRACT.md
 Rule:      Same input + same vocab = SAME output. If not, protocol is incomplete.
-Version:   2.2.0 — Two-Group Model (Structure Path + Function Signature)
+Version:   3.0.0 — Two-Group Model (Structure Path + Function Signature)
 """
 
 import json
@@ -1163,7 +1163,7 @@ def validate_working_tree(src_path=None):
 
 
 if __name__ == "__main__":
-    print("=== SPARXSTAR AI Manifest Protocol (SPX) Validator v2.2.0 — Test Suite ===\n")
+    print("=== SPARXSTAR AI Manifest Protocol (SPX) Validator v3.0.0 — Test Suite ===\n")
     print("Two-Group Model: Structure Path + Function Signature\n")
 
     vocab = load_vocab()
