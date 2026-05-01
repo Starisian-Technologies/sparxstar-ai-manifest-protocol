@@ -223,7 +223,7 @@
     },
     "psr-only": {
       "description": "PSR-4 namespace and type declaration only. No SPX vocab rules.",
-      "applies_to": ["infrastructure", "library", "wordpress-plugin"]
+      "applies_to": ["infrastructure", "library", "mixed", "wordpress-plugin"]
     },
     "infrastructure": {
       "description": "Alias for psr-only.",

@@ -343,31 +343,198 @@ def print_result(composed):
     print(f"file:      {composed['file']}")
 
 
+def _parse_yaml_minimal(text):
+    """
+    Minimal YAML parser for spx.config.yml.
+
+    Supports: comments, scalar values (str / int / bool / null),
+    inline empty or single-depth lists ([...]), block mappings
+    (key: value, indentation-based), and block sequences (- item).
+
+    Does not support: anchors, tags, flow mappings, multi-line scalars.
+    Raises ValueError with a descriptive message on unsupported syntax.
+    """
+    import re
+
+    # Pre-process: strip comment lines and inline comments, drop blank lines.
+    lines = []
+    for raw in text.splitlines():
+        stripped = re.sub(r'\s*#.*$', '', raw)
+        if stripped.strip():
+            lines.append(stripped)
+
+    pos = [0]
+
+    def cur_line():
+        return lines[pos[0]] if pos[0] < len(lines) else None
+
+    def cur_indent():
+        line = cur_line()
+        return len(line) - len(line.lstrip()) if line else -1
+
+    def parse_scalar(s):
+        s = s.strip()
+        if s in ('true', 'yes', 'on'):
+            return True
+        if s in ('false', 'no', 'off'):
+            return False
+        if s in ('null', '~'):
+            return None
+        if s == '[]':
+            return []
+        # Inline list: ["item1", "item2"]
+        m_list = re.match(r'^\[(.*)\]$', s)
+        if m_list:
+            content = m_list.group(1).strip()
+            if not content:
+                return []
+            items = []
+            for item in re.split(r',\s*', content):
+                item = item.strip()
+                if len(item) >= 2 and item[0] in ('"', "'") and item[-1] == item[0]:
+                    items.append(item[1:-1])
+                else:
+                    items.append(item)
+            return items
+        try:
+            return int(s)
+        except ValueError:
+            pass
+        if len(s) >= 2 and s[0] in ('"', "'") and s[-1] == s[0]:
+            return s[1:-1]
+        return s
+
+    def parse_value(after_colon, key_indent):
+        after_colon = after_colon.strip()
+        if after_colon:
+            return parse_scalar(after_colon)
+        line = cur_line()
+        if line is None:
+            return None
+        ni = cur_indent()
+        if ni <= key_indent:
+            return None
+        ls = line.strip()
+        if ls.startswith('- ') or ls == '-':
+            return parse_sequence(ni)
+        return parse_mapping(ni)
+
+    def parse_mapping(min_indent):
+        result = {}
+        while True:
+            line = cur_line()
+            if line is None:
+                break
+            ind = cur_indent()
+            if ind < min_indent:
+                break
+            ls = line.strip()
+            if ls.startswith('- ') or ls == '-':
+                break
+            m = re.match(r'^(\s*)(\w[\w-]*)\s*:\s*(.*)', line)
+            if not m:
+                raise ValueError(f"Cannot parse mapping line: {line!r}")
+            key = m.group(2)
+            val_str = m.group(3)
+            pos[0] += 1
+            result[key] = parse_value(val_str, ind)
+        return result
+
+    def parse_sequence(min_indent):
+        result = []
+        while True:
+            line = cur_line()
+            if line is None:
+                break
+            ind = cur_indent()
+            if ind < min_indent:
+                break
+            ls = line.strip()
+            if not (ls.startswith('- ') or ls == '-'):
+                break
+            pos[0] += 1
+            item_content = ls[2:].strip() if ls.startswith('- ') else ''
+            item_base_indent = ind + 2
+            if not item_content:
+                nxt = cur_line()
+                if nxt and cur_indent() >= item_base_indent:
+                    nls = nxt.strip()
+                    if nls.startswith('- ') or nls == '-':
+                        result.append(parse_sequence(cur_indent()))
+                    else:
+                        result.append(parse_mapping(cur_indent()))
+                else:
+                    result.append(None)
+            else:
+                km = re.match(r'^(\w[\w-]*)\s*:\s*(.*)', item_content)
+                if km:
+                    item = {}
+                    first_key = km.group(1)
+                    item[first_key] = parse_value(km.group(2), item_base_indent - 1)
+                    while True:
+                        nxt = cur_line()
+                        if nxt is None:
+                            break
+                        ni = cur_indent()
+                        if ni < item_base_indent:
+                            break
+                        nls = nxt.strip()
+                        if nls.startswith('- ') or nls == '-':
+                            break
+                        nkm = re.match(r'^(\w[\w-]*)\s*:\s*(.*)', nls)
+                        if not nkm:
+                            raise ValueError(
+                                f"Cannot parse sequence item line: {nxt!r}"
+                            )
+                        pos[0] += 1
+                        item[nkm.group(1)] = parse_value(nkm.group(2), ni)
+                    result.append(item)
+                else:
+                    result.append(parse_scalar(item_content))
+        return result
+
+    return parse_mapping(0)
+
+
 def load_config(config_path="spx.config.yml"):
     """
     Load and return the repo-level SPX scope configuration.
     Returns None if the config file does not exist (legacy mode).
-    Fails with a clear error if the file exists but is not valid YAML.
+    Fails with a clear error if the file exists but cannot be parsed.
     """
     import pathlib
     path = pathlib.Path(config_path)
+    path_display = str(path)
+
     if not path.exists():
         return None
+
+    if path.is_dir():
+        _fail(
+            f"Config path '{path_display}' exists but is a directory; expected a file"
+        )
+
     try:
         try:
             import yaml
-            with open(path) as f:
-                return yaml.safe_load(f)
+            with open(path, encoding="utf-8") as f:
+                config = yaml.safe_load(f)
         except ImportError:
-            # Fallback: require JSON-compatible YAML (no anchors, no tags).
-            import re
-            with open(path) as f:
-                raw = f.read()
-            # Strip YAML comments for JSON parsing fallback.
-            raw = re.sub(r'#[^\n]*', '', raw)
-            return json.loads(raw)
+            # Fallback: minimal YAML parser for the SPX config schema.
+            with open(path, encoding="utf-8") as f:
+                config = _parse_yaml_minimal(f.read())
+    except OSError as exc:
+        _fail(f"Config file '{path_display}' could not be read: {exc}")
     except Exception as exc:
-        _fail(f"spx.config.yml exists but could not be parsed: {exc}")
+        _fail(f"Config file '{path_display}' exists but could not be parsed: {exc}")
+
+    if not isinstance(config, dict):
+        _fail(
+            f"Config file '{path_display}' parsed but is not a mapping — "
+            "check YAML structure"
+        )
+
+    return config
 
 
 def classify_file(rel_path, config):
@@ -412,12 +579,17 @@ def validate_psr_file(php_file, rel_str):
 
     Rules:
     - File must be readable UTF-8.
-    - Must declare exactly one namespace using standard PHP namespace syntax.
+    - Must declare at least one namespace using standard PHP namespace syntax.
     - Namespace must use backslash separators.
     - Namespace must not begin with 'SPX\\' (that is the SPX service namespace).
     - Must declare at least one class, interface, enum, or trait.
     - No SPX service-layer rules apply (no suffix check, no vocab check,
       no path-depth check, no action/entity/domain check).
+
+    Note: this validator checks only for the presence of a namespace
+    declaration and a class/interface/enum/trait declaration. It does not
+    enforce exactly one namespace declaration, `declare(strict_types=1);`,
+    or that the file contains only a single type declaration.
 
     Returns list of error strings. Empty = clean.
     """
@@ -934,11 +1106,14 @@ def validate_working_tree(src_path=None):
     import re
     import pathlib
 
-    config_path = os.environ.get("SPX_CONFIG_PATH", "spx.config.yml")
+    config_path = os.environ.get("SPX_CONFIG_PATH")
+    if config_path is None:
+        config_path = "spx.config.yml"
     resolved_src = src_path or "src"
 
-    # v3.0.0 scope-aware path
-    if pathlib.Path(config_path).exists():
+    # v3.0.0 scope-aware path.
+    # An explicitly empty SPX_CONFIG_PATH disables config detection.
+    if config_path and pathlib.Path(config_path).is_file():
         return validate_repository(config_path, resolved_src)
 
     # Legacy path — existing behavior, unchanged
