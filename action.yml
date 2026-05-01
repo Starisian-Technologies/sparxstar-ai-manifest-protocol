@@ -32,7 +32,7 @@ inputs:
       Relative path to the repo-level SPX scope configuration file.
       If present, the validator uses scope-aware classification instead of
       scanning all of src/ as SPX service-layer code.
-      Defaults to spx.config.yml. Set to '' to disable config detection.
+      Defaults to spx.config.yml.
     required: false
     default: spx.config.yml
 
