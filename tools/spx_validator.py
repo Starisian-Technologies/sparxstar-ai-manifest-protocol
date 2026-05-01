@@ -356,10 +356,16 @@ def _parse_yaml_minimal(text):
     """
     import re
 
-    # Pre-process: strip comment lines and inline comments, drop blank lines.
+    # Pre-process: strip full-line comments, inline comments (only when # is
+    # preceded by whitespace, so # inside quoted strings is preserved), and
+    # drop blank lines.
     lines = []
     for raw in text.splitlines():
-        stripped = re.sub(r'\s*#.*$', '', raw)
+        # Full-line comment — skip the whole line.
+        if re.match(r'^\s*#', raw):
+            continue
+        # Inline comment — strip only when # is preceded by at least one space/tab.
+        stripped = re.sub(r'\s+#.*$', '', raw)
         if stripped.strip():
             lines.append(stripped)
 
@@ -431,11 +437,11 @@ def _parse_yaml_minimal(text):
             ls = line.strip()
             if ls.startswith('- ') or ls == '-':
                 break
-            m = re.match(r'^(\s*)(\w[\w-]*)\s*:\s*(.*)', line)
+            m = re.match(r'^\s*(\w[\w-]*)\s*:\s*(.*)', line)
             if not m:
                 raise ValueError(f"Cannot parse mapping line: {line!r}")
-            key = m.group(2)
-            val_str = m.group(3)
+            key = m.group(1)
+            val_str = m.group(2)
             pos[0] += 1
             result[key] = parse_value(val_str, ind)
         return result
@@ -525,8 +531,10 @@ def load_config(config_path="spx.config.yml"):
                 config = _parse_yaml_minimal(f.read())
     except OSError as exc:
         _fail(f"Config file '{path_display}' could not be read: {exc}")
+        return None  # unreachable; satisfies static analysis
     except Exception as exc:
         _fail(f"Config file '{path_display}' exists but could not be parsed: {exc}")
+        return None  # unreachable; satisfies static analysis
 
     if not isinstance(config, dict):
         _fail(
@@ -1106,9 +1114,8 @@ def validate_working_tree(src_path=None):
     import re
     import pathlib
 
-    config_path = os.environ.get("SPX_CONFIG_PATH")
-    if config_path is None:
-        config_path = "spx.config.yml"
+    # An explicitly empty SPX_CONFIG_PATH env var disables config detection.
+    config_path = os.environ.get("SPX_CONFIG_PATH") or "spx.config.yml"
     resolved_src = src_path or "src"
 
     # v3.0.0 scope-aware path.
